@@ -581,6 +581,23 @@ async function route() {
   return renderList(params);
 }
 
+// Material ripple: starts where the pointer touched and fades out. Skipped for reduced motion.
+const RIPPLE_ON = '.btn, .chip, .icon-btn, .nav-item, .fab, .demo, .row[data-id], .menu button, .tabs button';
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+document.addEventListener('pointerdown', (e) => {
+  const el = e.target.closest(RIPPLE_ON);
+  if (!el || el.disabled || reduceMotion.matches || e.button !== 0) return;
+  const r = el.getBoundingClientRect();
+  const size = Math.max(r.width, r.height) * 2.2;
+  const dot = document.createElement('span');
+  dot.className = 'ripple';
+  dot.style.width = dot.style.height = `${size}px`;
+  dot.style.left = `${e.clientX - r.left - size / 2}px`;
+  dot.style.top = `${e.clientY - r.top - size / 2}px`;
+  el.append(dot);
+  dot.addEventListener('animationend', () => dot.remove());
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) { if (e.key === 'Escape') e.target.blur(); return; }
   const rows = $$('.row[data-id]');

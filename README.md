@@ -164,6 +164,23 @@ Actions in the right-hand column have no tool and no endpoint. They cannot be re
 | Due time | Arrival plus 1, 4, 8 or 24 hours by priority |
 | Lane | `auto_committed`, `needs_review`, `waiting_on_customer`, `no_action` (the agent's routing) |
 
+### 3.5 Console look and interaction states
+
+One palette runs through the sign-in page and the app: blue `#2C6CBC` for primary actions, selection and focus; sky `#71C3F7` for highlights; light grey `#F5F5F5` for the background; navy `#0B2545` for text. The sign-in background and the app bar use the same blue to sky to light gradient. Type is Google Sans Flex, icons are Material Symbols Rounded.
+
+| State | What the user sees |
+|---|---|
+| Hover | Background tint or a slight lift with shadow (rows, cards, demo accounts), 150 ms |
+| Pressed | Ripple from the point of contact plus a 3% press-in, 120 ms |
+| Selected | Sky tint with a blue check (demo account, filter chip, menu item), a blue bar on the left (keyboard cursor in the queue), tinted pill (current page in the sidebar) |
+| Focus | 3 px blue ring, not animated |
+| Disabled | Grey fill and grey label, not-allowed cursor (Sign in stays disabled until both fields are filled) |
+| Loading | Spinner and a verb on the button ("Signing in", "Writing to the ERP"), skeleton rows for lists |
+| Error | Red outline on the fields involved and the message directly under them |
+| Page change | Content rises 6 px and fades in, 200 ms |
+
+All motion is switched off when the operating system asks for reduced motion.
+
 ## 4. Architecture
 
 Described with the viewpoints of ISO/IEC/IEEE 42010.
