@@ -9,6 +9,9 @@
   --navy-900: #071A33; --navy-800: #0B2545; --navy-700: #13315C; --navy-600: #1D4577;
   --sky-500: #3FA7E0; --sky-400: #63B9EA; --sky-200: #BFE3F8; --sky-100: #DDF0FC; --sky-50: #F0F8FE;
   --white: #FFFFFF;
+  --login-start: hsl(213 62% 45%); /* #2C6CBC */
+  --login-mid: hsl(203 89% 71%);   /* #71C3F7 */
+  --login-end: hsl(0 0% 96%);      /* #F5F5F5 */
   --primary: var(--navy-800); --on-primary: var(--white);
   --primary-container: var(--sky-100); --on-primary-container: var(--navy-900);
   --accent: var(--sky-500);
@@ -217,8 +220,8 @@ td.num, th.num { text-align: right; }
 .scrim { position: fixed; inset: 0; background: rgba(7, 26, 51, .32); z-index: 44; }
 
 /* Sign in */
-.signin { min-height: 100vh; display: grid; place-items: center; padding: var(--s4); background: var(--surface-dim); }
-.signin-card { width: min(1040px, 100%); background: var(--surface); border-radius: var(--r-xl); padding: 40px; display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "brand brand" "intro form" "demo form"; column-gap: 48px; align-items: start; }
+.signin { min-height: 100vh; display: grid; place-items: center; padding: var(--s4); background-color: var(--login-start); background-image: linear-gradient(90deg, var(--login-start) 0%, var(--login-mid) 50%, var(--login-end) 100%); }
+.signin-card { width: min(1040px, 100%); background: var(--surface); border: 1px solid rgba(255, 255, 255, .7); box-shadow: 0 12px 40px rgba(7, 26, 51, .18), 0 2px 6px rgba(7, 26, 51, .08); border-radius: var(--r-xl); padding: 40px; display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "brand brand" "intro form" "demo form"; column-gap: 48px; align-items: start; }
 .signin-brand { grid-area: brand; }
 .signin-intro { grid-area: intro; }
 .signin-form { grid-area: form; padding-top: var(--s5); }
