@@ -1,0 +1,23 @@
+customer_id,name,email,role
+C001,Maria Lopez,maria@bluefinbistro.example,Purchasing
+C002,Tom Reid,purchasing@greenleafcafes.example,Purchasing
+C003,Aisha Khan,procurement@harborviewhotel.example,Procurement
+C004,Paul Ng,admin@sunrisedaycare.example,Office admin
+C005,Jenna Brooks,ops@metrofitness.example,Operations
+C005,Matt Silva,matt.silva@metrofitness.example,Northgate club manager
+C006,Luis Ortega,chef@oakandember.example,Head chef
+C007,Dana White,supplies@pinecrestsd.example,Supplies office
+C007,Minh Hoang,m.hoang@pinecrestsd.example,Custodial lead
+C008,Nora Fields,nora@riversideclinic.example,Practice manager
+C009,Priya Shah,hello@coastalcatering.example,Owner
+C010,Ben Carter,taproom@lakesidebrew.example,Taproom manager
+C011,Frank Russo,frank.russo.deli@mail.example,Owner
+C012,Karen Liu,facilities@summitoffice.example,Facilities
+C013,Carlos Mendez,orders@tidewaterseafood.example,Owner
+C014,Rita Gomez,goldenspoondiner@mail.example,Owner
+C015,James Ford,office@northsidecc.example,Office
+C016,Olivia Grant,events@bayfrontvenue.example,Events
+C017,Hannah Moore,maple.bakery@mail.example,Owner
+C018,Lily Tran,admin@crescentdental.example,Office manager
+C019,Derek Hall,manager@ironworksgym.example,Manager
+C020,Grace Kim,purchasing@seasideseniorliving.example,Purchasing

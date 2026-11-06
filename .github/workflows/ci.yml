@@ -1,0 +1,43 @@
+name: ci
+# Every push and pull request: unit tests, the 40-email smoke test, and a boot test against real Postgres 17.
+# Vercel's Git integration deploys a preview for every branch and production for main.
+# Protect main in GitHub settings so a merge needs this workflow green.
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit tests and 40-email smoke test (embedded Postgres, no model)
+        run: npm test
+      - name: Boot against Postgres 17 and sign in
+        env:
+          DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres
+          DEMO_PASSWORD: ci-password-for-boot-test
+          PORT: 3100
+        run: |
+          node src/server.js & sleep 25
+          curl -fsS http://localhost:3100/api/health
+          curl -fsS -c jar -H 'content-type: application/json' -d '{"username":"ops","password":"ci-password-for-boot-test"}' http://localhost:3100/api/login
+          curl -fsS -b jar "http://localhost:3100/api/tickets?view=all&size=100" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);if(r.total!==40)process.exit(1);console.log('tickets',r.total)})"
+          curl -fsS -b jar http://localhost:3100/api/results | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);console.log('lane agreement',r.lane_agreement,'unsafe',r.unsafe_auto_commits);if(r.unsafe_auto_commits!==0)process.exit(1)})"

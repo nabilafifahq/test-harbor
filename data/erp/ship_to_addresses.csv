@@ -1,0 +1,24 @@
+ship_to_id,customer_id,name,address,is_default
+S001,C001,Bluefin Bistro - Pier Street,"14 Pier Street, Port Harbor",1
+S002,C002,Greenleaf Cafes - Central Kitchen,"220 Elm Avenue, Port Harbor",1
+S003,C003,Harborview Hotel - Main Receiving,"1 Harborview Drive, Port Harbor",1
+S004,C003,Harborview Conference Center,"5 Harborview Drive, Port Harbor (dock B)",0
+S005,C004,Sunrise Daycare - Admin Office,"88 Maple Road, Port Harbor",1
+S006,C005,Metro Fitness - Downtown,"300 Main Street, Port Harbor",1
+S007,C005,Metro Fitness - Eastside,"41 Ocean Blvd, Port Harbor",0
+S008,C005,Metro Fitness - Northgate,"9 Northgate Plaza, Port Harbor",0
+S009,C006,Oak & Ember Steakhouse,"72 Market Street, Port Harbor",1
+S010,C007,Pinecrest SD - Central Warehouse,"500 School Lane, Pinecrest",1
+S011,C008,Riverside Medical Clinic,"12 River Road, Port Harbor",1
+S012,C009,Coastal Catering Co,"3 Dockside Way, Port Harbor",1
+S013,C010,Lakeside Brewery,"77 Lakeshore Drive, Port Harbor",1
+S014,C011,Union Street Deli,"210 Union Street, Port Harbor",1
+S015,C012,Summit Office Park,"1000 Summit Parkway, Port Harbor",1
+S016,C013,Tidewater Seafood Market,"4 Wharf Street, Port Harbor",1
+S017,C014,Golden Spoon Diner,"61 Route 9, Port Harbor",1
+S018,C015,Northside Community Center,"150 North Ave, Port Harbor",1
+S019,C016,Bayfront Event Venue,"2 Bayfront Promenade, Port Harbor",1
+S020,C017,Maple Leaf Bakery,"33 Maple Road, Port Harbor",1
+S021,C018,Crescent Dental Group,"500 Crescent Ave, Suite 2, Port Harbor",1
+S022,C019,Ironworks Gym,"18 Foundry Lane, Port Harbor",1
+S023,C020,Seaside Senior Living,"400 Seaside Road, Port Harbor",1

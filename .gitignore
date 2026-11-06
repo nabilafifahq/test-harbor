@@ -1,0 +1,6 @@
+node_modules/
+.pgdata/
+.vercel/
+.env
+.env.*
+*.log

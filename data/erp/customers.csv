@@ -1,0 +1,21 @@
+customer_id,name,payment_terms,credit_limit,open_balance,status
+C001,Bluefin Bistro Group,NET30,20000,4200,ACTIVE
+C002,Greenleaf Cafes,NET30,15000,3100,ACTIVE
+C003,Harborview Hotel,NET45,50000,18750,ACTIVE
+C004,Sunrise Daycare Centers,NET30,5000,1200,ACTIVE
+C005,Metro Fitness Clubs,NET30,12000,2500,ACTIVE
+C006,Oak & Ember Steakhouse,NET15,8000,7600,ACTIVE
+C007,Pinecrest School District,NET60,40000,9000,ACTIVE
+C008,Riverside Medical Clinic,NET30,10000,0,ACTIVE
+C009,Coastal Catering Co,NET30,7000,6800,CREDIT_HOLD
+C010,Lakeside Brewery,NET30,6000,900,ACTIVE
+C011,Union Street Deli,NET15,3000,400,ACTIVE
+C012,Summit Office Park Management,NET30,15000,3000,ACTIVE
+C013,Tidewater Seafood Market,NET30,8000,1500,ACTIVE
+C014,Golden Spoon Diner,NET15,4000,3950,CREDIT_HOLD
+C015,Northside Community Center,NET30,3000,0,ACTIVE
+C016,Bayfront Event Venue,NET30,20000,5000,ACTIVE
+C017,Maple Leaf Bakery,NET15,5000,800,ACTIVE
+C018,Crescent Dental Group,NET30,6000,0,ACTIVE
+C019,Ironworks Gym,NET30,4000,3500,ACTIVE
+C020,Seaside Senior Living,NET45,25000,7000,ACTIVE
