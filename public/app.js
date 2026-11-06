@@ -54,24 +54,26 @@ function renderSignin(error = '') {
   $('#root').innerHTML = `
   <main class="signin" id="main">
     <div class="signin-card">
-      <div>
-        <div class="brand"><div class="brand-mark">H<span>P</span></div><span class="brand-name">Order Desk</span></div>
+      <div class="signin-brand brand"><div class="brand-mark">H<span>P</span></div><span class="brand-name">Order Desk</span></div>
+      <div class="signin-intro">
         <h1 class="headline-s">Sign in</h1>
         <p class="muted">Use your Harbor Point account to review the orders the agent prepared from today's inbox.</p>
-        <h2 class="title-s" style="margin-top:32px">Demo accounts</h2>
+      </div>
+      <form id="signin" class="signin-form" novalidate>
+        <div class="outlined"><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder=" " required><label for="u">Username</label></div>
+        <div class="outlined"><input id="p" name="password" type="password" autocomplete="current-password" placeholder=" " required><label for="p">Password</label>
+          <button type="button" class="icon-btn" id="peek" aria-label="Show password">${icon('visibility')}</button></div>
+        <p class="err" id="signin-err" role="alert">${error ? `${icon('error')} ${esc(error)}` : ''}</p>
+        <div class="signin-actions"><button class="btn btn-filled" id="go">Sign in</button></div>
+      </form>
+      <section class="signin-demo" aria-labelledby="demo-h">
+        <h2 class="title-s" id="demo-h">Demo accounts</h2>
         <p class="body-s muted">Pick a role to fill the username. The password is in the submission note.</p>
         <div class="demo-accounts">
           ${[['ops', 'Jo Park', 'Operations: reviews and approves orders'], ['credit', 'Rina Hartono', 'Credit and AR: releases credit blocks and price exceptions'], ['admin', 'Alex Morgan', 'Admin: security flags and demo reset']].map(([u, n, d]) => `
             <button type="button" data-user="${u}"><span class="avatar">${initials(n)}</span><span><span class="title-s">${n}</span><br><span class="body-s muted">${d}</span></span></button>`).join('')}
         </div>
-      </div>
-      <form id="signin" novalidate>
-        <div class="outlined"><input id="u" name="username" autocomplete="username" placeholder=" " required><label for="u">Username</label></div>
-        <div class="outlined"><input id="p" name="password" type="password" autocomplete="current-password" placeholder=" " required><label for="p">Password</label>
-          <button type="button" class="icon-btn" id="peek" aria-label="Show password">${icon('visibility')}</button></div>
-        <p class="err" id="signin-err" role="alert">${error ? `${icon('error')} ${esc(error)}` : ''}</p>
-        <div class="actions" style="justify-content:flex-end;margin-top:24px"><button class="btn btn-filled" id="go">Sign in</button></div>
-      </form>
+      </section>
     </div>
   </main>`;
   $$('.demo-accounts button').forEach((b) => b.onclick = () => { $('#u').value = b.dataset.user; $('#p').focus(); });
