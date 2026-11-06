@@ -49,6 +49,12 @@ function snack(text, action) {
 }
 
 // ---------------------------------------------------------------- sign in
+const DEMO = [
+  { u: 'ops', name: 'Jo Park', role: 'Operations', can: 'Reviews and approves orders', tone: 'tone-ops' },
+  { u: 'credit', name: 'Rina Hartono', role: 'Credit and AR', can: 'Releases credit blocks and price exceptions', tone: 'tone-credit' },
+  { u: 'admin', name: 'Alex Morgan', role: 'Admin', can: 'Security flags and demo reset', tone: 'tone-admin' },
+];
+
 function renderSignin(error = '') {
   document.title = 'Sign in · Order Desk';
   $('#root').innerHTML = `
@@ -60,33 +66,73 @@ function renderSignin(error = '') {
         <p class="muted">Use your Harbor Point account to review the orders the agent prepared from today's inbox.</p>
       </div>
       <form id="signin" class="signin-form" novalidate>
-        <div class="outlined"><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder=" " required><label for="u">Username</label></div>
-        <div class="outlined"><input id="p" name="password" type="password" autocomplete="current-password" placeholder=" " required><label for="p">Password</label>
-          <button type="button" class="icon-btn" id="peek" aria-label="Show password">${icon('visibility')}</button></div>
-        <p class="err" id="signin-err" role="alert">${error ? `${icon('error')} ${esc(error)}` : ''}</p>
-        <div class="signin-actions"><button class="btn btn-filled" id="go">Sign in</button></div>
+        <div class="who" id="who" aria-live="polite"></div>
+        <div class="outlined" id="u-field"><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder=" " required aria-describedby="signin-err"><label for="u">Username</label></div>
+        <div class="outlined" id="p-field"><input id="p" name="password" type="password" autocomplete="current-password" placeholder=" " required aria-describedby="caps signin-err"><label for="p">Password</label>
+          <button type="button" class="icon-btn" id="peek" aria-label="Show password" aria-pressed="false">${icon('visibility')}</button></div>
+        <p class="hint" id="caps" hidden>${icon('warning')} Caps Lock is on</p>
+        <p class="err" id="signin-err" role="alert"></p>
+        <div class="signin-actions">
+          <button type="button" class="btn btn-text" id="other" hidden>Use another account</button>
+          <button class="btn btn-filled" id="go" disabled>Sign in</button>
+        </div>
       </form>
       <section class="signin-demo" aria-labelledby="demo-h">
         <h2 class="title-s" id="demo-h">Demo accounts</h2>
         <p class="body-s muted">Pick a role to fill the username. The password is in the submission note.</p>
-        <div class="demo-accounts">
-          ${[['ops', 'Jo Park', 'Operations: reviews and approves orders'], ['credit', 'Rina Hartono', 'Credit and AR: releases credit blocks and price exceptions'], ['admin', 'Alex Morgan', 'Admin: security flags and demo reset']].map(([u, n, d]) => `
-            <button type="button" data-user="${u}"><span class="avatar">${initials(n)}</span><span><span class="title-s">${n}</span><br><span class="body-s muted">${d}</span></span></button>`).join('')}
+        <div class="demo-accounts" role="group" aria-labelledby="demo-h">
+          ${DEMO.map((d) => `
+            <button type="button" class="demo" data-user="${d.u}" aria-pressed="false">
+              <span class="avatar pic ${d.tone}" aria-hidden="true">${initials(d.name)}</span>
+              <span class="demo-text"><span class="title-s">${d.name}</span><span class="body-s muted">${d.role}: ${d.can.toLowerCase()}</span></span>
+              <span class="demo-check" aria-hidden="true">${icon('check_circle')}</span>
+            </button>`).join('')}
         </div>
       </section>
     </div>
   </main>`;
-  $$('.demo-accounts button').forEach((b) => b.onclick = () => { $('#u').value = b.dataset.user; $('#p').focus(); });
-  $('#peek').onclick = () => { const p = $('#p'); const show = p.type === 'password'; p.type = show ? 'text' : 'password'; $('#peek').setAttribute('aria-label', show ? 'Hide password' : 'Show password'); $('#peek').innerHTML = icon(show ? 'visibility_off' : 'visibility'); };
+
+  const u = $('#u'), pw = $('#p'), go = $('#go');
+  const setError = (msg) => {
+    $('#signin-err').innerHTML = msg ? `${icon('error')} ${esc(msg)}` : '';
+    $('#u-field').classList.toggle('invalid', Boolean(msg));
+    $('#p-field').classList.toggle('invalid', Boolean(msg));
+  };
+  // The profile block and the selected card follow whatever is in the username field.
+  const sync = () => {
+    const d = DEMO.find((x) => x.u === u.value.trim().toLowerCase());
+    $$('.demo').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.user === d?.u)));
+    $('#who').innerHTML = d
+      ? `<span class="avatar avatar-xl pic ${d.tone}">${initials(d.name)}</span><span class="who-text"><span class="title-m">${d.name}</span><span class="who-role"><span class="tag info">${d.role}</span></span></span>`
+      : `<span class="avatar avatar-xl pic tone-empty">${icon('person', 'ic-xl')}</span><span class="who-text"><span class="title-m">Welcome back</span><span class="body-s muted">Choose a demo account or type your username</span></span>`;
+    $('#who').classList.toggle('chosen', Boolean(d));
+    $('#other').hidden = !d;
+    go.disabled = !(u.value.trim() && pw.value);
+  };
+  $$('.demo').forEach((b) => b.onclick = () => { u.value = b.dataset.user; setError(''); sync(); pw.focus(); });
+  $('#other').onclick = () => { u.value = ''; pw.value = ''; setError(''); sync(); u.focus(); };
+  u.oninput = () => { setError(''); sync(); };
+  pw.oninput = () => { setError(''); sync(); };
+  const caps = (e) => { if (e.getModifierState) $('#caps').hidden = !e.getModifierState('CapsLock'); };
+  pw.addEventListener('keyup', caps); pw.addEventListener('keydown', caps);
+  pw.addEventListener('blur', () => { $('#caps').hidden = true; });
+  $('#peek').onclick = () => {
+    const show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    $('#peek').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    $('#peek').setAttribute('aria-pressed', String(show));
+    $('#peek').innerHTML = icon(show ? 'visibility_off' : 'visibility');
+  };
   $('#signin').onsubmit = async (e) => {
     e.preventDefault();
-    const u = $('#u').value.trim(), p = $('#p').value;
-    if (!u || !p) { $('#signin-err').innerHTML = `${icon('error')} Enter a username and password.`; return; }
-    $('#go').disabled = true; $('#go').textContent = 'Signing in';
-    try { await api('/api/login', { method: 'POST', body: { username: u, password: p } }); state.me = null; location.hash = '#/tickets'; route(); }
-    catch (err) { $('#signin-err').innerHTML = `${icon('error')} ${esc(err.message)}`; $('#go').disabled = false; $('#go').textContent = 'Sign in'; }
+    if (go.disabled) return;
+    go.disabled = true; go.classList.add('loading'); go.innerHTML = '<span class="spinner" aria-hidden="true"></span> Signing in';
+    try { await api('/api/login', { method: 'POST', body: { username: u.value.trim(), password: pw.value } }); state.me = null; location.hash = '#/tickets'; route(); }
+    catch (err) { setError(err.message); go.classList.remove('loading'); go.textContent = 'Sign in'; sync(); pw.select(); }
   };
-  $('#u').focus();
+  sync();
+  if (error) setError(error);
+  u.focus();
 }
 
 // ---------------------------------------------------------------- shell
@@ -111,7 +157,7 @@ function shell(active) {
       <div class="topbar-right">
         <span class="tag info hide-sm" title="All times and due dates use this clock">${icon('schedule')} Demo clock ${stamp(me?.demo_now || '2026-11-02T12:00:00-05:00')}</span>
         <button class="icon-btn" id="help-btn" aria-label="How Order Desk works">${icon('help', 'ic-lg')}</button>
-        <button class="icon-btn" id="me-btn" aria-label="Account" aria-haspopup="menu"><span class="avatar">${initials(me?.user.display_name)}</span></button>
+        <button class="icon-btn" id="me-btn" aria-label="Account: ${esc(me?.user.display_name)}" aria-haspopup="menu"><span class="avatar pic tone-${me?.user.role}">${initials(me?.user.display_name)}</span></button>
       </div>
     </header>
     <div class="banner" id="banner">${me && !me.durable ? `${icon('info')} Demo storage: the data resets to this morning's inbox when the server restarts.` : ''}</div>
@@ -136,7 +182,7 @@ function shell(active) {
   $('#q-clear')?.addEventListener('click', () => go({ q: '', page: 1 }));
   $('#help-btn').onclick = openHelp;
   $('#me-btn').onclick = (e) => openMenu(e.currentTarget, [
-    { html: `<span class="avatar sm">${initials(me.user.display_name)}</span><span>${esc(me.user.display_name)}<br><span class="body-s muted">${ROLE[me.user.role]}</span></span>`, disabled: true },
+    { html: `<span class="avatar pic tone-${me.user.role}">${initials(me.user.display_name)}</span><span>${esc(me.user.display_name)}<br><span class="body-s muted">${ROLE[me.user.role]}</span></span>`, disabled: true },
     'hr',
     ...(me.user.role === 'admin' ? [{ html: `${icon('refresh')} Reset demo to 07:00`, run: resetDemo }] : []),
     { html: `${icon('logout')} Sign out`, run: async () => { await api('/api/logout', { method: 'POST' }); state.me = null; location.hash = '#/signin'; } },
