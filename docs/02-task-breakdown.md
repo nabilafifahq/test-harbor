@@ -66,3 +66,32 @@ What the reviewer caught that changed the build is in `05-results-and-agent-log.
 **B10. Deploy**
 - Spec: Vercel with `public/` static and `api/index.js` as the function; Postgres through the Neon integration; GitHub Actions for tests and a boot test against Postgres 17; first request seeds once even with parallel instances.
 - Accept: CI green; the live URL signs in and shows 40 tickets.
+
+## Phase 4. Model agent and background processing (7 November)
+
+Gap found on a second read of the brief: the agent deciding each email was still the rules reader, with the model optional and switched off. These tasks put a language model in the loop without moving the safety line.
+
+**B13. Model agent with tool calling** (`src/model-agent.js`, `src/llm.js`)
+- Spec: OpenAI-compatible tool calling, DeepInfra by default (`deepseek-ai/DeepSeek-V4-Flash-0731`). Ten read-only tools (`find_sender`, `get_customer`, `get_ship_tos`, `search_products`, `get_product`, `get_price`, `get_stock`, `get_credit`, `find_order`, `last_orders`) and one final `submit_draft` with intent, next action, lines, sites, PO, dates, questions and reasoning. Email text goes in as data inside `<email>` tags; instructions in the user turn because DeepInfra advises against system messages with tools. At most 12 turns; a draft that fails validation goes back to the model with the errors. Models listed in `LLM_MODEL` are tried in order, then the rules reader.
+- Accept: scripted-model test passes the loop end to end; `validateDraft` rejects a made-up intent, a non-SKU and a fractional quantity.
+- Do not: give the model any tool that writes, prices or sends.
+
+**B14. Two readers, one decision** (`processEmail`)
+- Spec: the model's draft replaces the rules reading; the rules reader still reads every email. New check M01: both readers agree on intent and on resolved items, quantities and delivery sites. Model failure: flag MODEL_FALLBACK, use the rules reading, never auto-commit.
+- Accept: a model that adds one case to E001 stops the auto-commit; a model that returns 503 on E003 leaves it for a person; `npm test` still prints 40/40 for the rules reader.
+
+**B15. Background queue** (`src/queue.js`)
+- Spec: phase A reads up to `AGENT_CONCURRENCY` emails in parallel (read-only, order does not matter); phase B decides lanes strictly in arrival order under a lock row. Stop a wave when under 100 seconds remain (Vercel limit 300). `waitUntil` keeps the function alive after the response. One retry per failed read. One bad email parks itself as PROCESSING_ERROR instead of blocking the queue. No polling while the queue is empty (Neon compute lesson from QA-072).
+- Accept: the console shows progress and tickets appear wave by wave against a slow fake model (`test/fake-model.mjs`); a second run started in parallel processes nothing twice.
+
+**B16. New mail in** (`src/eml.js`, `POST /api/emails`, `POST /api/inbound`)
+- Spec: RFC 5322 and MIME parser (headers, quoted-printable, base64, multipart, attachments). Seed reads `data/inbox/*.eml`. Console form (type or upload `.eml`) for signed-in users; webhook with `CRON_SECRET` bearer for a mail provider. Cap the demo inbox at 300 emails.
+- Accept: the parser matches the JSON-lines export on all 40 emails (body, sender, subject, date, attachment count); a pasted E006 becomes HP-1041 with CREDIT_BLOCK.
+
+**B17. Reviewer edits**
+- Spec: on an order ticket a reviewer with approval rights can change SKU, quantity and delivery address, add and remove lines, and preview prices, stock and credit (`/preview`) without writing. Prices still come from `priceFor`; the commit validates that the address belongs to the customer. The diff is written to the audit log.
+- Accept: E006 with the first line at 5 and HPS-1408 added previews 469.00 and 69.00 over the limit; a foreign ship-to is refused.
+
+**B18. Model eval** (`scripts/eval.mjs`, `.github/workflows/eval.yml`)
+- Spec: the 40 emails through the real model in CI with the `LLM_API_KEY` secret; job summary with routing and intent agreement, unsafe and missed commits, fallbacks, readers agreeing, calls, tokens, cost, wall time, and a table of every lane difference with the model's own reasoning. Exit non-zero on any unsafe auto-commit.
+- Accept: runs on a push to `eval/...` and by hand; the result feeds `05-results-and-agent-log.md`.

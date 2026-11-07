@@ -85,3 +85,18 @@ test('when the model fails, the rules reader takes over and a person approves', 
   assert.equal(c.E003.lane, 'needs_review');
   assert.equal(c.E003.erp_status, 'none');
 });
+
+test('two background runs at once do not process an email twice', async () => {
+  await runPipeline(db);
+  emails = (await db.query('select * from emails')).rows;
+  const chatFn = scriptedModel();
+  for (let i = 0; i < 5; i++) {
+    const [a, b] = await Promise.all([runAgentQueue(db, { chatFn, budgetMs: 60000 }), runAgentQueue(db, { chatFn, budgetMs: 60000 })]);
+    if (!a.pending && !b.pending) break;
+  }
+  const created = (await db.query("select email_id, count(*)::int as n from audit_events where action='ticket_created' group by email_id")).rows;
+  assert.equal(created.length, 40);
+  assert.ok(created.every((r) => r.n === 1));
+  const reads = (await db.query("select count(*)::int as n from audit_events where action='model_read'")).rows[0].n;
+  assert.equal(reads, 40);
+});
