@@ -23,13 +23,17 @@ const money = (v) => Math.round(v * 100) / 100;
 
 // ---------- one-time setup, safe when several function instances start together ----------
 let ready = false;
-// The seed is tied to the reader: adding a model key (or a replay file) reloads the inbox once and lets the model read it.
-const SEED_KEY = () => `seed:v3:${process.env.AGENT_REPLAY ? 'replay' : llmConfigured() ? 'model' : 'rules'}`;
+// Without a model key the app replays a recorded run of the real model (data/model-run), clearly labelled as such.
+// LLM_MODE=off runs the rules reader alone; a key switches to the live model.
+const DEFAULT_REPLAY = path.join(DATA_DIR, 'model-run', 'deepseek-v4-flash-0731.reads.json');
+export const replayFile = () => (llmConfigured() || process.env.LLM_MODE === 'off' ? '' : process.env.AGENT_REPLAY || (fs.existsSync(DEFAULT_REPLAY) ? DEFAULT_REPLAY : ''));
+// The seed is tied to the reader: adding a model key reloads the inbox once and lets the live model read it.
+const SEED_KEY = () => `seed:v3:${llmConfigured() ? 'model' : replayFile() ? 'replay' : 'rules'}`;
 export async function runPipeline(db) {
   await seed(db, DATA_DIR, PASSWORD);
   // Replay a recorded model run (scripts/eval.mjs writes it): the same readings and tool traces, no key needed.
-  if (process.env.AGENT_REPLAY) {
-    for (const r of JSON.parse(fs.readFileSync(process.env.AGENT_REPLAY, 'utf8'))) {
+  if (replayFile()) {
+    for (const r of JSON.parse(fs.readFileSync(replayFile(), 'utf8'))) {
       await db.query("insert into agent_reads (email_id, status, model, reading, trace, usage, error, finished_at) values ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,now()) on conflict do nothing",
         [r.email_id, r.status === 'done' ? 'done' : 'failed', r.model, JSON.stringify(r.reading), JSON.stringify(r.trace || []), JSON.stringify(r.usage || {}), r.error]);
     }
@@ -265,7 +269,7 @@ export async function results(db) {
   const reads = (await db.query('select status, usage from agent_reads')).rows;
   const usage = (k) => reads.reduce((n, x) => n + (Number(x.usage?.[k]) || 0), 0);
   const checks = (await db.query('select checks from cases')).rows.flatMap((x) => x.checks.filter((k) => k.code === 'M01'));
-  const agent = { model: (await db.query('select model from agent_reads where model is not null limit 1')).rows[0]?.model || llmModel(), configured: reads.length > 0, read_by_model: reads.filter((x) => x.status === 'done').length, model_failed: reads.filter((x) => x.status === 'failed').length,
+  const agent = { model: (await db.query('select model from agent_reads where model is not null limit 1')).rows[0]?.model || llmModel(), configured: reads.length > 0, live: llmConfigured(), replay_of: reads.find((x) => x.usage?.replay_of)?.usage.replay_of || null, read_by_model: reads.filter((x) => x.status === 'done').length, model_failed: reads.filter((x) => x.status === 'failed').length,
     calls: usage('calls'), prompt_tokens: usage('prompt_tokens'), completion_tokens: usage('completion_tokens'), cost_usd: Math.round(usage('cost_usd') * 10000) / 10000,
     readers_compared: checks.length, readers_agree: checks.filter((k) => k.pass).length };
   return { agent, emails: rows.length, lanes: facets(rows, ['lane']).lane, intents: facets(rows, ['intent']).intent, scored: scored.length, lane_agreement: laneMatch, intent_agreement: intentMatch, unsafe_auto_commits: unsafe, missed_auto_commits: missedAuto, orders_written: committed.n, value_written: money(Number(committed.v)), model: rows[0]?.model || 'rules', per };
@@ -310,7 +314,7 @@ export async function handle(req, res) {
     }
     if (!user) throw httpErr(401, 'Please sign in.');
 
-    if (p === '/api/me') return send(res, 200, { user, model: llmModel(), auto_commit: AUTO_COMMIT, durable: db.durable, demo_now: DEMO_NOW });
+    if (p === '/api/me') return send(res, 200, { user, model: llmModel(), live_model: llmConfigured(), replay: Boolean(replayFile()), auto_commit: AUTO_COMMIT, durable: db.durable, demo_now: DEMO_NOW });
     if (p === '/api/tickets' && req.method === 'GET') return send(res, 200, { ...(await listTickets(db, url, user)), queue: await queueStatus(db) });
     if (p === '/api/agent/status') return send(res, 200, await queueStatus(db));
     if (p === '/api/agent/run' && req.method === 'POST') {

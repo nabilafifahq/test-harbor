@@ -244,6 +244,7 @@ function drawBanner() {
     const pct = Math.round(((q.total - q.pending) / Math.max(q.total, 1)) * 100);
     parts.push(`<span class="queue-msg">${icon('smart_toy')} The agent is working in the background: ${q.processed} of ${q.total} emails done${q.waiting_for_model ? `, ${q.waiting_for_model} waiting for the model` : ''}. Tickets appear as they finish.</span><span class="qbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span>`);
   }
+  if (state.me?.replay && !q?.pending) parts.push(`<span>${icon('smart_toy')} The 40 inbox emails show a recorded run of the real model. New emails use the rules reader until a model key is set.</span>`);
   if (state.me && !state.me.durable) parts.push(`<span>${icon('info')} Demo storage: the data resets to this morning's inbox when the server restarts.</span>`);
   el.innerHTML = parts.join('');
   el.classList.toggle('working', Boolean(q?.pending));
@@ -600,6 +601,7 @@ async function renderTicket(id) {
             <dt>Work</dt><dd>${ag.usage?.calls || 0} model calls, ${modelSteps.length} tool calls, ${((ag.usage?.prompt_tokens || 0) + (ag.usage?.completion_tokens || 0)).toLocaleString('en-US')} tokens${ag.usage?.cost_usd != null ? `, ${ag.usage.cost_usd.toFixed(4)} USD` : ''}, ${((ag.usage?.ms || 0) / 1000).toFixed(1)} s</dd></dl>
             ${ag.reasoning ? `<blockquote class="why">${esc(ag.reasoning)}</blockquote>` : ''}
             ${ag.used ? '' : `<div class="callout info">${icon('info')}<div>The model did not finish, so the rules reader read this email and nothing is written without a person.</div></div>`}
+            ${ag.usage?.replay_of ? `<p class="body-s muted">Recorded reading from ${esc(ag.usage.replay_of)}, replayed because this server has no model key. The checks and lanes ran here.</p>` : ''}
             <p class="body-s muted">The model suggests; plain code runs the checks and picks the lane. All tools are read-only.</p>`
           : '<p class="body-s muted">Read by the rules reader. No model is configured on this server.</p>'}
           <div class="title-s" style="margin-top:12px">Steps</div>
@@ -693,7 +695,7 @@ async function renderResults() {
   const laneName = { auto_committed: 'Auto-processed', needs_review: 'Needs review', waiting_on_customer: 'Ask customer', no_action: 'No action' };
   main.innerHTML = `<div class="page"><h1 class="title-l">Results on the 2 November inbox</h1>
     <p class="muted">How the agent routed each of the 40 emails, compared with the hand-checked labels in <code>data/golden_labels.json</code>. Reader: ${esc(r.agent.configured ? `${r.agent.model}, checked by the rules reader` : 'rules reader, no model configured')}.</p>
-    ${r.agent.configured ? `<div class="callout info">${icon('smart_toy')}<div>Model <b>${esc(r.agent.model)}</b> read ${r.agent.read_by_model} emails (${r.agent.model_failed} fell back to the rules reader) in ${r.agent.calls} model calls and ${(r.agent.prompt_tokens + r.agent.completion_tokens).toLocaleString('en-US')} tokens, ${r.agent.cost_usd} USD. Model and rules reader read the same request on ${r.agent.readers_agree} of ${r.agent.readers_compared} emails where both apply.</div></div>` : ''}
+    ${r.agent.configured ? `<div class="callout info">${icon('smart_toy')}<div>${r.agent.replay_of ? `Replay of a recorded run (${esc(r.agent.replay_of)}); new emails use the rules reader until a model key is set. ` : ''}Model <b>${esc(r.agent.model)}</b> read ${r.agent.read_by_model} emails (${r.agent.model_failed} fell back to the rules reader) in ${r.agent.calls} model calls and ${(r.agent.prompt_tokens + r.agent.completion_tokens).toLocaleString('en-US')} tokens, ${r.agent.cost_usd} USD. Model and rules reader read the same request on ${r.agent.readers_agree} of ${r.agent.readers_compared} emails where both apply.</div></div>` : ''}
     <div class="kpis">
       <div class="kpi"><b>${r.lane_agreement}/${r.scored}</b>routing matches the labels</div>
       <div class="kpi"><b>${r.unsafe_auto_commits}</b>orders written that should have waited (target 0)</div>

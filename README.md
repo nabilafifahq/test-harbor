@@ -266,6 +266,7 @@ flowchart LR
 | `LLM_BASE_URL` | No | `https://api.deepinfra.com/v1/openai` | Any OpenAI-compatible endpoint: Ollama `http://localhost:11434/v1`, llama.cpp `http://localhost:8080/v1`, OpenRouter `https://openrouter.ai/api/v1` |
 | `LLM_MODEL` | No | `deepseek-ai/DeepSeek-V4-Flash-0731` | Model id; a comma-separated list is tried in order before the rules reader takes over |
 | `LLM_MODE` | No | unset | `off` runs the rules reader only |
+| `AGENT_REPLAY` | No | `data/model-run/deepseek-v4-flash-0731.reads.json` when there is no key | Replays a recorded run of the real model (readings and tool traces from the eval-model job); the checks and lanes run live. New mail uses the rules reader until a key is set. The console labels it |
 | `LLM_PRICE_IN`, `LLM_PRICE_OUT` | No | DeepInfra price of the default model | USD per million tokens, for the cost shown per ticket |
 | `AGENT_CONCURRENCY` | No | `8` | Emails read by the model in parallel |
 | `CRON_SECRET` | No | unset | Token for `/api/agent/run` and `/api/inbound`; Vercel Cron sends it automatically |
