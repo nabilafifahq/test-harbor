@@ -2,13 +2,13 @@
 
 [![ci](https://github.com/nabilafifahq/test-harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/nabilafifahq/test-harbor/actions/workflows/ci.yml)
 
-Order intake for Harbor Point Supply Co., run by an agent and supervised by people. Every customer email becomes a ticket. The agent reads it, looks up the customer, items, prices, stock and credit in the ERP through read-only tools, and drafts the order. Orders that pass every check are written to the ERP automatically. Everything else waits in a review queue with the draft, the evidence and the reason already prepared.
+Order intake for Harbor Point Supply Co., run by an agent and supervised by people. Every customer email becomes a ticket. A language model (DeepSeek V4 Flash on DeepInfra by default) reads it, calls read-only ERP tools to find the customer, items, prices, stock and credit, and submits a draft with its suggested next step. Plain code then runs twelve checks. Orders that pass every check are written to the ERP automatically. Everything else waits in a review queue with the draft, the evidence and the reason already prepared. New mail is processed in the background.
 
 | Document control | |
 |---|---|
 | Document ID | HP-O2C-README |
-| Version | 1.0.0 |
-| Date | 6 November 2026 |
+| Version | 1.1.0 |
+| Date | 7 November 2026 |
 | Owner | Nabila ([@nabilafifahq](https://github.com/nabilafifahq)) |
 | Status | Released |
 | Audience | Reviewers and operators (sections 1 to 3), engineers (sections 4 to 11) |
@@ -36,18 +36,19 @@ Order intake for Harbor Point Supply Co., run by an agent and supervised by peop
 
 ### 1.1 Scope
 
-The system covers one business process: turning inbound order emails into ERP sales orders. In scope are ingestion of the inbox, classification, extraction, ERP lookups, drafting, automatic commit for clean orders, human review for everything else, and a complete audit trail. Payment, invoicing, delivery scheduling and live mailbox connection are out of scope for this release (see [section 12](#12-roadmap)).
+The system covers one business process: turning inbound order emails into ERP sales orders. In scope are ingestion of the inbox (raw `.eml` files, a form in the console, and an inbound webhook for a mail provider), background processing, classification, extraction, ERP lookups, drafting, automatic commit for clean orders, human review and editing for everything else, and a complete audit trail. Payment, invoicing, delivery scheduling and a direct IMAP or Microsoft Graph mailbox connection are out of scope for this release (see [section 12](#12-roadmap)).
 
 ### 1.2 Capabilities
 
 | Capability | What the user gets |
 |---|---|
 | Ticket per email | Number, priority, due time, assignee, status, internal notes |
-| Agent reading | Intent, SKUs, quantities, delivery site, PO, dates, in English or Spanish |
+| Agent reading | A model with tool calling decides the request type, items, quantities, delivery site, PO, dates and the next step, in English or Spanish. A deterministic rules reader cross-checks it and takes over when the model fails |
 | ERP lookups | Customer and contact, ship-to, catalog match, contract or list price, stock and incoming supply, credit exposure, order history |
 | Drafting | New orders (split by site), changes to open orders, cancellations, quotes, replies to the customer |
-| Automatic commit | Only when all eleven checks pass ([section 3.3](#33-the-eleven-checks)) |
-| Review console | Queue with search operators, filters, sort and Work next; ticket page with the consequence of approval shown before the click |
+| Background processing | New mail is queued and read without anyone waiting; tickets appear as each email is done |
+| Automatic commit | Only when all twelve checks pass ([section 3.3](#33-the-twelve-checks)) |
+| Review console | Queue with search operators, filters, sort and Work next; ticket page with the agent's reasoning and tool calls, editable items, quantities and delivery address, and the consequence of approval shown before the click |
 | Roles | Operations, Credit and AR, Admin, enforced on the server |
 | Audit | Every agent step and every human decision, searchable |
 
@@ -75,7 +76,14 @@ npm start
 # open http://localhost:3000 and sign in as ops / harbor-point-demo-2026
 ```
 
-On first start the app creates the schema, loads `data/`, and runs the agent over all 40 emails. This takes a few seconds.
+On first start the app creates the schema, loads the ERP CSVs and the 40 raw emails in `data/inbox/`, and processes them. Without a model this takes a few seconds. To run the model agent locally:
+
+```bash
+LLM_API_KEY=<your DeepInfra key> npm start      # DeepInfra, default model
+LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3:14b npm start   # Ollama on your own machine
+```
+
+With a model the inbox is queued and read in the background; the console shows progress and tickets appear as they finish.
 
 ### 2.3 Run the tests
 
@@ -83,12 +91,20 @@ On first start the app creates the schema, loads `data/`, and runs the agent ove
 npm test
 ```
 
-Runs the unit tests for `src/algo.js`, then the end-to-end smoke test: all 40 emails through the agent, followed by assertions on every safety rule and on the write path. Expected tail of the output:
+Runs the unit tests for `src/algo.js`, the end-to-end smoke test (all 40 emails through the rules reader, then assertions on every safety rule and on the write path), and the model-agent tests with a scripted model in place of the real one (tool loop, draft validation, readers-agree check, fallback, queue, audit). No network is needed. Expected tail of the smoke test:
 
 ```
 lane agreement with golden labels: 40/40
 smoke test passed
 ```
+
+To score the real model on the 40 emails:
+
+```bash
+LLM_API_KEY=<key> npm run eval      # writes eval/<model>.json and .md
+```
+
+The same runs in GitHub Actions (`eval-model`, manual or on a push to a branch named `eval/...`) with the `LLM_API_KEY` repository secret.
 
 ### 2.4 Five-minute tour
 
@@ -98,6 +114,8 @@ smoke test passed
 4. Open **HP-1005** (Metro Fitness). One email for three sites becomes three orders. Approve and three sales orders are written.
 5. Search with operators: `priority:urgent`, `customer:bluefin`, `sku:HPS-1408`, `is:unassigned`, `flag:credit_block`.
 6. Open **Results** for routing against the hand-checked labels, and **Audit log** for every step.
+7. Press **New email**, type an order from `maria@bluefinbistro.example`, and watch the agent read it in the background. The ticket shows the model's tool calls and reasoning.
+8. As `credit`, open HP-1006, change a quantity or add a line, press **Check prices, stock and credit**, then approve.
 
 Keyboard: `/` search, `j` and `k` move, `Enter` open, `Esc` back, `n` Work next.
 
@@ -107,10 +125,11 @@ Keyboard: `/` search, `j` and `k` move, `Enter` open, `Esc` back, `n` Work next.
 
 ```mermaid
 flowchart LR
-  A[Email arrives] --> B[Ticket HP-10xx<br/>priority and due time]
-  B --> C[Agent reads the email]
-  C --> D[Read-only ERP tools<br/>customer, catalog, price,<br/>stock, credit, history]
-  D --> E{All eleven<br/>checks pass?}
+  A[Email arrives<br/>.eml, form or webhook] --> Q[(Queue)]
+  Q --> C[Model agent<br/>reads in the background]
+  C <--> D[Read-only ERP tools<br/>customer, catalog, price,<br/>stock, credit, history]
+  C --> R[Draft and<br/>suggested next step]
+  R --> E{Twelve checks<br/>in code}
   E -- yes --> F[commitProposal writes<br/>the order in one transaction]
   E -- needs a decision --> G[Review queue<br/>approve, edit, reject]
   E -- needs the customer --> H[Question drafted<br/>person sends it]
@@ -119,10 +138,10 @@ flowchart LR
   F & G & H & I --> J[(Audit log)]
 ```
 
-1. **Ticket.** The email receives a number, a priority and a due time.
-2. **Read.** The agent determines the request type and extracts SKUs, quantities, delivery site, PO and dates.
-3. **Look up.** Read-only tools resolve the customer from the sender, match items to the catalog, price them (a contract price valid today wins over list), and check stock and credit.
-4. **Check.** Eleven checks run in code. The language model, when one is configured, never decides whether something is safe.
+1. **Queue.** The email is stored and queued. Nobody waits: a background run picks it up at once, and a daily sweep and the console restart any run that was cut off.
+2. **Read.** The model works through read-only tools (`find_sender`, `search_products`, `get_product`, `get_price`, `get_stock`, `get_credit`, `get_ship_tos`, `find_order`, `last_orders`, `get_customer`) and submits a draft: request type, lines, delivery sites, PO, dates, questions and a suggested next step with its reasoning. Up to eight emails are read in parallel.
+3. **Cross-check.** The rules reader reads the same email. If the model times out or returns an invalid draft twice, the rules reader's reading is used and nothing is written without a person.
+4. **Check.** Twelve checks run in code, in arrival order, because duplicates, stock and credit depend on earlier emails. The model never decides whether something is safe.
 5. **Route.** All checks pass: the order is committed and the ticket closes as Auto-processed. A decision is needed: the ticket waits for the right role. Only a question for the customer is open: the reply is drafted for a person to send.
 6. **Approve.** The reviewer sees what approval will change (orders, stock, credit after) before acting. `commitProposal` re-reads price, stock, status and credit inside one transaction and refuses if anything changed.
 7. **Record.** Every step and decision is written to `audit_events`.
@@ -133,13 +152,13 @@ flowchart LR
 |---|---|---|
 | Read the ERP, classify, extract, match, price, check | Credit hold or over limit (Credit and AR) | Change prices or credit limits |
 | Draft orders, changes, cancellations, quotes and replies | A price that differs from ours (Credit and AR) | Edit a shipped order |
-| Commit a new order that passes all eleven checks | Substitutes for discontinued items, unclear units | Delete records |
-| Close spam and auto-replies when rules and model agree | Changes and cancellations of existing orders | Send email (replies go to an outbox) |
+| Commit a new order that passes all twelve checks | Substitutes for discontinued items, unclear units | Delete records |
+| Close spam and auto-replies when both readers agree | Changes and cancellations of existing orders | Send email (replies go to an outbox) |
 | Link duplicates and same-day follow-ups | Unknown or unverified senders; injection attempts (Admin) | Act on instructions written inside an email |
 
 Actions in the right-hand column have no tool and no endpoint. They cannot be reached by persuading a model.
 
-### 3.3 The eleven checks
+### 3.3 The twelve checks
 
 | Code | Check | If it fails |
 |---|---|---|
@@ -154,6 +173,7 @@ Actions in the right-hand column have no tool and no endpoint. They cannot be re
 | D01 | Customer PO not seen before | Duplicate closed, revision reviewed |
 | Q01 | Nothing to ask the customer | Question drafted |
 | X01 | No instructions aimed at the system | Review by Admin |
+| M01 | The model and the rules reader read the same request: intent, items, quantities and delivery sites | Review |
 
 ### 3.4 Ticket model
 
@@ -189,12 +209,13 @@ Described with the viewpoints of ISO/IEC/IEEE 42010.
 
 ```mermaid
 flowchart LR
-  Customer -- email --> Inbox[(Order inbox<br/>data/emails.jsonl)]
+  Customer -- email --> Inbox[(Order inbox<br/>data/inbox/*.eml)]
+  Mail[Mail provider] -- webhook --> App
   Inbox --> App[Order Desk]
   App <-- read-only tools --> ERP[(ERP tables in Postgres)]
   App -- commitProposal --> ERP
   Reviewer -- browser --> App
-  App -. optional .-> Model[LLM reader<br/>OpenAI-compatible]
+  App <-- tool calling --> Model[DeepInfra<br/>or any OpenAI-compatible model]
 ```
 
 ### 4.2 Components
@@ -203,19 +224,22 @@ flowchart LR
 |---|---|---|
 | Console | `public/` | Single-page app, no framework and no build step |
 | API | `src/app.js`, entry `api/index.js` (Vercel) or `src/server.js` (local) | Sessions, roles, queue, ticket actions, stock, audit, results |
-| Reader | `src/extract.js` | Deterministic reading of an email |
+| Model agent | `src/model-agent.js` | Tool specs, the tool-calling loop, draft validation, fallback across models |
+| Queue | `src/queue.js` | Background runs: model reads in parallel, decisions in arrival order, resumable |
+| Mail reader | `src/eml.js` | RFC 5322 and MIME parsing of `.eml` (quoted-printable, base64, multipart, attachments) |
+| Rules reader | `src/extract.js` | Deterministic reading of an email, used as cross-check and fallback |
 | Agent | `src/agent.js` `processEmail` | Tools, matching, checks, priority, ticket write |
 | Commit | `src/agent.js` `commitProposal` | The only writer to ERP tables |
 | Auth | `src/auth.js` | Argon2id, sessions, lockout, role rules |
 | Algorithms | `src/algo.js` | Ranking, edit distance, index, heap, sort |
-| Model client | `src/llm.js` | Optional OpenAI-compatible reader |
+| Model client | `src/llm.js` | OpenAI-compatible chat with tool calling, retries, token cost |
 
 ### 4.3 Data
 
 | Group | Tables |
 |---|---|
 | ERP snapshot | `customers`, `customer_contacts`, `ship_to_addresses`, `products`, `customer_prices`, `inventory`, `incoming_supply`, `sales_orders`, `sales_order_lines` |
-| Work | `emails`, `cases` (tickets: lane, status, priority, flags, checks, proposal, trace), `comments`, `outbox` |
+| Work | `emails`, `agent_reads` (the model's reading, tool trace, tokens and cost per email), `cases` (tickets: lane, status, priority, flags, checks, proposal, trace), `comments`, `outbox` |
 | Control | `audit_events`, `users`, `sessions`, `app_meta` |
 
 ### 4.4 Key decisions
@@ -227,7 +251,9 @@ flowchart LR
 | AD-03 | Read-only tools and no tool for prices, credit limits or deletes | Excessive agency is removed by capability, not by instruction |
 | AD-04 | Postgres, one primary | Stock and credit checks need one transaction; this workload fits one node with headroom |
 | AD-05 | Plain Node and ES modules, three runtime dependencies | Small surface to audit; easy to move from Vercel to a VPS or own hardware |
-| AD-06 | Rules reader by default, model reader optional | The rules reader routes all 40 emails as labelled with no external dependency; a model is added only after it matches the labels |
+| AD-06 | The model reads and suggests; the rules reader cross-checks; code decides | Two independent readings must match before anything is written without a person; when the model is down the work continues with the rules reader and a person approves |
+| AD-07 | Model reads in parallel, decisions in arrival order | Reading is read-only and slow, so it parallelises; duplicates, stock and credit depend on order |
+| AD-08 | Background work with `waitUntil` and resumable runs | A Vercel function stops after 300 seconds; each run stops in time and the next one continues where it left off |
 
 ## 5. Configuration
 
@@ -236,7 +262,13 @@ flowchart LR
 | `DATABASE_URL` or `POSTGRES_URL` | Production | unset (in-process Postgres) | Postgres connection string |
 | `DEMO_PASSWORD` | Production | `harbor-point-demo-2026` | Password for the three demo users |
 | `AUTO_COMMIT` | No | `true` | `false` puts the automatic lane in shadow mode |
-| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | No | unset | Model reader: Ollama `http://localhost:11434/v1`, llama.cpp `http://localhost:8080/v1`, OpenRouter `https://openrouter.ai/api/v1`, DeepInfra `https://api.deepinfra.com/v1/openai` |
+| `LLM_API_KEY` | For the model | unset | DeepInfra key. Without it (and without `LLM_BASE_URL`) the rules reader runs alone |
+| `LLM_BASE_URL` | No | `https://api.deepinfra.com/v1/openai` | Any OpenAI-compatible endpoint: Ollama `http://localhost:11434/v1`, llama.cpp `http://localhost:8080/v1`, OpenRouter `https://openrouter.ai/api/v1` |
+| `LLM_MODEL` | No | `deepseek-ai/DeepSeek-V4-Flash-0731` | Model id; a comma-separated list is tried in order before the rules reader takes over |
+| `LLM_MODE` | No | unset | `off` runs the rules reader only |
+| `LLM_PRICE_IN`, `LLM_PRICE_OUT` | No | DeepInfra price of the default model | USD per million tokens, for the cost shown per ticket |
+| `AGENT_CONCURRENCY` | No | `8` | Emails read by the model in parallel |
+| `CRON_SECRET` | No | unset | Token for `/api/agent/run` and `/api/inbound`; Vercel Cron sends it automatically |
 | `DEMO_NOW` | No | `2026-11-02T12:00:00-05:00` | Clock for due times |
 | `BUSINESS_DATE` | No | `2026-11-02` | Order date and price validity date |
 
@@ -253,22 +285,34 @@ flowchart LR
 
 ### 6.2 Pipeline
 
-1. A push runs `.github/workflows/ci.yml`: install, unit tests, the 40-email smoke test, then a boot test against Postgres 17 that signs in and checks 40 tickets and zero unsafe automatic commits.
-2. Vercel's Git integration builds the same commit: `public/` is served as static files, `api/index.js` becomes one serverless function (`vercel.json`).
-3. `main` is protected: a merge requires CI to pass.
+1. A push runs `.github/workflows/ci.yml`: install, unit tests, the 40-email smoke test, the model-agent tests, then a boot test against Postgres 17 that signs in and checks 40 tickets and zero unsafe automatic commits.
+2. Vercel's Git integration builds the same commit: `public/` is served as static files, `api/index.js` becomes one serverless function (`vercel.json`). Branches named `eval/...` are not deployed.
+3. `.github/workflows/eval.yml` scores the real model on the 40 emails, by hand or on a push to `eval/...`.
+4. To stop a red commit from reaching production, protect `main` in GitHub (require the `ci` check) and merge through pull requests.
 
 ### 6.3 First run and reset
 
-The first request after a deploy creates the schema, loads the data and runs the agent once. A claim row in `app_meta` prevents two instances from doing it at the same time. An Admin can reset the demo to 07:00 from the account menu; everyone is signed out.
+The first request after a deploy creates the schema, loads the data and queues the inbox; the agent reads it in the background (about two minutes for 40 emails with the default model). A claim row in `app_meta` prevents two instances from seeding at the same time, and a lock row keeps decisions to one worker. An Admin can reset the demo to 07:00 from the account menu; everyone is signed out and the agent reads the inbox again.
 
-### 6.4 Rollback
+### 6.4 New mail and background work
+
+| Way in | How |
+|---|---|
+| Console | **New email**: type it or upload a `.eml` file |
+| Mail provider webhook | `POST /api/inbound` with `Authorization: Bearer $CRON_SECRET`, body `{"raw": "<the .eml text>"}` or `{"from_email", "from_name", "subject", "body"}` |
+| Data folder | `.eml` files in `data/inbox/` are loaded at seed |
+
+Each new email is queued and a background run starts at once (`waitUntil`). A run reads with the model until it has less than 100 seconds left, then stops cleanly; with `CRON_SECRET` set it starts the next run itself. Vercel Cron calls `/api/agent/run` once a day as a backstop, and an open console restarts a stalled run within a minute. Nothing polls the database while the queue is empty, so the Neon compute can sleep.
+
+### 6.5 Rollback
 
 Promote the previous production deployment in Vercel (Deployments, then Promote to Production). The schema is created by the app, so a rollback needs no migration step in this release.
 
-### 6.5 Observability
+### 6.6 Observability
 
 - Every server error is logged with a short reference code that is also shown to the user.
-- `audit_events` records each agent tool call summary, each human decision and each refused commit with its reasons.
+- `audit_events` records each model reading (model, tools called, tokens, cost, time), each fallback, each ticket, each human decision, each reviewer edit and each refused commit with its reasons.
+- Each ticket keeps the full tool trace (inputs and outputs), shown on the ticket page.
 - `GET /api/health` returns `{"ok":true}` without touching the database, for uptime checks.
 
 ## 7. Security
@@ -280,7 +324,7 @@ Promote the previous production deployment in Vercel (Deployments, then Promote 
 | Authorisation | Role checks on the server for every write; the console hiding a button is not relied on |
 | Cross-site requests | Origin check on every write; no CORS headers |
 | Browser hardening | Content Security Policy without inline or third-party scripts, `frame-ancestors 'none'`, HSTS, `nosniff`, strict referrer policy |
-| Prompt injection | Email text is data. Injection patterns raise a flag routed to Admin; system prices are always used |
+| Prompt injection | Email text is data, wrapped as such in the prompt. The model can only call read-only tools and submit a draft. Injection patterns are also caught in code (the model's own flag is extra), routed to Admin; system prices are always used |
 | Excessive agency | No tool exists for prices, credit limits, deletes, shipped-order edits or sending email |
 | Errors | Generic message with a reference code; no stack traces to the browser |
 | Secrets | Environment variables only; `.env` files are ignored by git |
@@ -291,8 +335,8 @@ Mapped to the ISO/IEC 25010 product quality characteristics that matter most her
 
 | Characteristic | How it is verified |
 |---|---|
-| Functional suitability | Smoke test: lane agreement with `data/golden_labels.json` (40 of 40), specific assertions for each trap email |
-| Reliability | Commit is idempotent; re-validation inside the transaction; concurrent approvals rejected by row version |
+| Functional suitability | Smoke test: lane agreement with `data/golden_labels.json` (40 of 40 for the rules reader), specific assertions for each trap email; `npm run eval` scores the model the same way |
+| Reliability | Commit is idempotent; re-validation inside the transaction; concurrent approvals rejected by row version; model failure falls back to the rules reader; a run cut off by the time limit resumes |
 | Security | Smoke test asserts the injection flag and that nothing risky reaches the ERP; CI boot test checks zero unsafe commits |
 | Usability | Consequence block before approval; errors next to their cause; keyboard flow; layout checked at 1440 and 390 pixels |
 | Maintainability | Three runtime dependencies; one writer to the ERP; `CLAUDE.md` rules for contributors |
@@ -321,22 +365,26 @@ api/index.js            Vercel function entry
 src/
   app.js                API, sessions, queue, actions
   agent.js              tools, matcher, checks, commitProposal
-  extract.js            deterministic email reader
+  model-agent.js        model agent: tool specs, loop, draft validation
+  queue.js              background runs
+  eml.js                .eml parser
+  extract.js            rules reader
   algo.js               algorithms and data structures
   auth.js               passwords, sessions, roles
   db.js                 Postgres or in-process Postgres
-  llm.js                optional model reader
+  llm.js                OpenAI-compatible client with tool calling
   schema.sql            database schema
   seed.js               data loader
   server.js             local server
 public/                 console (HTML, CSS, JS, fonts, icons)
-data/                   ERP snapshot, 40 emails, golden labels
-test/                   unit and smoke tests
+data/                   ERP snapshot, inbox/*.eml (40 emails), golden labels
+test/                   unit, smoke and model-agent tests; fake-model.mjs for local runs without a key
+scripts/eval.mjs        scores the model on the 40 emails
 docs/                   submission documents
 scripts/icons.py        rebuilds public/icons.svg from Material Symbols
 CLAUDE.md, AGENTS.md    rules for coding agents
 vercel.json             hosting configuration
-.github/workflows/      CI
+.github/workflows/      CI and the model eval
 ```
 
 ## 11. Contributing
@@ -351,9 +399,9 @@ The demo is hosted on Vercel. For production use:
 2. **Access control:** finer roles per team and customer group, approval limits by order value, four-eyes approval on price overrides.
 3. **Security baseline:** OWASP ASVS level 2, edge rate limits, dependency and secret scanning in CI, audit log shipped to append-only storage.
 4. **Hosting:** a VPS or Harbor Point's own hardware when volume or data rules require it. Postgres grows vertically on one primary with a streaming replica; the app tier grows horizontally.
-5. **Model reader:** a local model (Ollama or llama.cpp) for data that must stay in-house, or an API model through OpenRouter or DeepInfra. A model may auto-commit only after it matches the golden labels; the checks stay in code.
+5. **Models:** a local model (Ollama or llama.cpp) for data that must stay in-house, or a second API model as the fallback before the rules reader. Each model is scored with `npm run eval` before it is switched on.
 6. **Onboarding:** a guided first ticket for new reviewers, role explainers, and a practice mode on a copy of the data.
-7. **Automation pipeline:** live mailbox ingestion (IMAP or Microsoft Graph), a queue with retries, fallback from the model reader to the rules reader, and alerts when the queue backs up.
+7. **Automation pipeline:** direct mailbox ingestion (IMAP or Microsoft Graph) feeding the existing queue, a dead-letter view for emails that failed twice, and alerts when the queue backs up.
 
 ## 13. Submission documents
 
@@ -378,3 +426,4 @@ The demo is hosted on Vercel. For production use:
 | Version | Date | Change |
 |---|---|---|
 | 1.0.0 | 6 November 2026 | First release: agent pipeline, review console, roles, audit, Vercel deployment |
+| 1.1.0 | 7 November 2026 | Model agent with tool calling (DeepInfra), readers-agree check, background queue, `.eml` ingest and inbound webhook, reviewer edits of items and delivery address, model eval in CI |

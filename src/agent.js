@@ -326,7 +326,7 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
     check('I01', 'Request is a new order', ext.intent === 'new_order', ext.intent);
     check('U01', 'Sender identity verified', !flags.some((f) => f.code === 'UNVERIFIED_SENDER'));
     // The model's own questions count when the code found nothing to ask.
-    if (!p.questions.length && ext.model_questions?.length && !['order_change', 'cancellation'].includes(ext.intent)) p.questions.push(...ext.model_questions.slice(0, 4));
+    if (!p.questions.length && ext.model_questions?.length && ['order', 'quote'].includes(p.kind)) p.questions.push(...ext.model_questions.slice(0, 4));
     check('Q01', 'Nothing to ask the customer', p.questions.length === 0, p.questions.join(' | '));
     if (read?.reading) {
       // Two independent readers: an order is written without a person only when both read the same lines.
@@ -346,7 +346,7 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
       const green = p.kind === 'order' && checks.every((c) => c.pass) && p.orders.length > 0;
       // When the model was configured but failed, one reader is not enough to write without a person.
       if (green) lane = autoCommit && !(read && !read.reading) ? 'auto_committed' : 'needs_review';
-      else if (p.questions.length && !flags.some((f) => f.severity === 'bad')) lane = 'waiting_on_customer';
+      else if (p.questions.length && p.kind !== 'route' && !flags.some((f) => f.severity === 'bad')) lane = 'waiting_on_customer';
     }
     if (p.questions.length) p.reply_draft = draftReply(email, p);
   } else {

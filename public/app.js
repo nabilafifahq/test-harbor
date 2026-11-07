@@ -285,7 +285,7 @@ function openNewEmail() {
         <div class="field"><label for="nm-name">Sender name</label><input id="nm-name" placeholder="Luis Ortega" autocomplete="off"></div>
         <div class="field"><label for="nm-subj">Subject</label><input id="nm-subj" placeholder="Order for Thursday"></div>
         <div class="field"><label for="nm-body">Email text</label><textarea id="nm-body" rows="8" placeholder="Hi, please send 4 cases of HPS-1408 and 2 cases of the big toilet paper rolls. PO 7781."></textarea></div>
-        <p class="body-s muted">Known senders to try: chef@oakandember.example, orders@bluefinbistro.example. Any other address is treated as a new prospect.</p>
+        <p class="body-s muted">Registered contacts to try: maria@bluefinbistro.example (Bluefin Bistro), chef@oakandember.example (Oak &amp; Ember, near its credit limit). Another address at a customer domain is flagged as unverified; any other address is a new prospect.</p>
       </div>
       <div data-pane="eml" hidden>
         <div class="field"><label for="nm-file">.eml file</label><input id="nm-file" type="file" accept=".eml,message/rfc822,text/plain"></div>

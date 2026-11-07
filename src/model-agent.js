@@ -169,7 +169,8 @@ export function readingToExtraction(d, email) {
     lines: (d.lines || []).map((l) => ({
       sku: l.sku ? String(l.sku).toUpperCase() : null,
       qty: l.qty == null ? null : Number(l.qty),
-      unit_text: l.unit_as_written || '',
+      // "x", "qty" and the like mark a quantity, not a unit; only real unit words should raise a unit question.
+      unit_text: /^(x|×|\*|qty|quantity|of|nos?\.?|#)$/i.test(String(l.unit_as_written || '').trim()) ? '' : String(l.unit_as_written || '').trim(),
       description: l.text || '',
       ship_to_id: l.ship_to_id || null,
       label: l.ship_to_id ? null : (String(l.text || '').match(/^([^:\n]{2,40}):/)?.[1] || null), // a site named before a colon
