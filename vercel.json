@@ -49,7 +49,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "eval/**": false
+      "eval/**": false,
+      "eval-results": false
     }
   },
   "crons": [
