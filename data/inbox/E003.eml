@@ -1,0 +1,23 @@
+From: Dana White <supplies@pinecrestsd.example>
+To: orders@harborpointsupply.example
+Subject: PO PSD-PO-88231
+Date: Mon, 02 Nov 2026 07:14:00 -0500
+Message-ID: <e003.1793621640@pinecrestsd.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Good morning,
+
+Please process PO PSD-PO-88231 below. Deliver to the central warehouse.
+
+sku,description,qty
+HPS-1301,All purpose cleaner conc,6
+HPS-1303,Glass cleaner 32oz,6
+HPS-1201,33 gal liners black,30
+HPS-1103,Toilet tissue 2ply,20
+HPS-1304,Foam soap refill,4
+
+Regards,
+Dana White
+Supplies Office, Pinecrest School District

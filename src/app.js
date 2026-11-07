@@ -8,7 +8,11 @@ import { seed } from './seed.js';
 import { processEmail, commitProposal, audit, buildMatcher, httpErr, PRIORITY_RANK, DEMO_NOW } from './agent.js';
 import { login, logout, sessionUser, readCookie, cookieName, CAN, SESSION_ABSOLUTE_MS } from './auth.js';
 import { InvertedIndex, MinHeap, sortBy, parseQuery, facets } from './algo.js';
-import { llmModel } from './llm.js';
+import { llmModel, llmConfigured } from './llm.js';
+import { enqueue, queueStatus, runAgentQueue } from './queue.js';
+import { parseEml } from './eml.js';
+// Same lookup as waitUntil() in @vercel/functions (Apache-2.0), without its peer dependencies (ws, AWS SDK).
+const waitUntil = (job) => globalThis[Symbol.for('@vercel/request-context')]?.get?.()?.waitUntil?.(job);
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
@@ -21,6 +25,8 @@ const money = (v) => Math.round(v * 100) / 100;
 let ready = false;
 export async function runPipeline(db) {
   await seed(db, DATA_DIR, PASSWORD);
+  // With a model configured the inbox is queued and read in the background (queue.js).
+  if (llmConfigured()) { await enqueue(db); return { queued: true }; }
   const matcher = await buildMatcher(db);
   const emails = (await db.query('select * from emails order by received_at')).rows;
   for (const e of emails) await processEmail(db, { ...e, received_at: new Date(e.received_at).toISOString() }, { autoCommit: AUTO_COMMIT, matcher });
@@ -30,19 +36,57 @@ async function ensureReady(db) {
   if (ready) return;
   await db.exec('create table if not exists app_meta (k text primary key, v text, at timestamptz default now())');
   for (let i = 0; i < 55; i++) {
-    const s = (await db.query("select v, at from app_meta where k='seed'")).rows[0];
+    const s = (await db.query("select v, at from app_meta where k='seed:v2'")).rows[0];
     if (s?.v === 'done') { ready = true; return; }
     if (!s || Date.now() - new Date(s.at).getTime() > 120000) {
-      if (s) await db.query("delete from app_meta where k='seed' and v='running'");
-      const claim = await db.query("insert into app_meta (k, v) values ('seed','running') on conflict (k) do nothing returning k");
+      if (s) await db.query("delete from app_meta where k='seed:v2' and v='running'");
+      const claim = await db.query("insert into app_meta (k, v) values ('seed:v2','running') on conflict (k) do nothing returning k");
       if (claim.rows.length) {
-        try { await runPipeline(db); await db.query("update app_meta set v='done', at=now() where k='seed'"); ready = true; return; }
-        catch (e) { await db.query("delete from app_meta where k='seed'"); throw e; }
+        try { const r = await runPipeline(db); await db.query("update app_meta set v='done', at=now() where k='seed:v2'"); ready = true; if (r.queued) inBackground(db); return; }
+        catch (e) { await db.query("delete from app_meta where k='seed:v2'"); throw e; }
       }
     }
     await sleep(1000);
   }
   throw httpErr(503, 'Loading the demo inbox. Refresh in a few seconds.');
+}
+
+// ---------- background agent runs ----------
+// waitUntil keeps the Vercel function alive after the response; locally the Node process stays up anyway.
+// When a run ends with work left and made progress, it starts the next run itself (needs CRON_SECRET).
+export function inBackground(db) {
+  const job = (async () => {
+    const before = (await queueStatus(db)).processed;
+    const s = await runAgentQueue(db, { autoCommit: AUTO_COMMIT });
+    const host = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    if (s.pending && s.processed > before && process.env.CRON_SECRET && host) {
+      await fetch(`https://${host}/api/agent/run`, { method: 'POST', headers: { authorization: `Bearer ${process.env.CRON_SECRET}` }, signal: AbortSignal.timeout(5000) }).catch(() => {});
+    }
+  })().catch((e) => console.error('[agent] background run failed', e));
+  waitUntil(job);
+  return job;
+}
+
+const bearerOk = (req) => Boolean(process.env.CRON_SECRET) && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
+
+// New mail from the console form, or from a mail provider's inbound webhook. Raw .eml or plain fields.
+async function ingest(db, b, by) {
+  const e = typeof b.raw === 'string' && b.raw.trim() ? parseEml(b.raw.slice(0, 200000)) : { from_name: str(b.from_name, 200), from_email: str(b.from_email, 200).toLowerCase(), subject: str(b.subject, 300), body: str(b.body, 20000), attachments: [] };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.from_email || '')) throw httpErr(422, 'Add the sender address, for example chef@oakandember.example.');
+  if (!str(e.body)) throw httpErr(422, 'The email body is empty. Paste the text of the email.');
+  const n = Number((await db.query('select count(*)::int as n from emails')).rows[0].n);
+  if (n >= Number(process.env.MAX_EMAILS || 300)) throw httpErr(429, 'The demo inbox is full. An Admin can reset the demo.');
+  const last = (await db.query('select max(received_at) as m from emails')).rows[0].m;
+  // The demo runs on the inbox day, so new mail lands just after the last email or at the demo clock.
+  const at = new Date(Math.max(new Date(last).getTime() + 60000, new Date(DEMO_NOW).getTime())).toISOString();
+  const id = `E${String(n + 1).padStart(3, '0')}`;
+  const ticket = `HP-${1001 + n}`;
+  await db.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)', [id, ticket, at, e.from_name || e.from_email, e.from_email, e.subject || '(no subject)', e.body.slice(0, 20000), JSON.stringify(e.attachments || [])]);
+  await enqueue(db, [id]);
+  await audit(db, by, by === 'inbound' ? 'system' : 'human', null, 'email_received', { email_id: id, ticket_no: ticket, from: e.from_email, source: b.raw ? 'eml' : 'form' });
+  if (!llmConfigured()) await runAgentQueue(db, { autoCommit: AUTO_COMMIT }); // rules only: instant
+  else inBackground(db);
+  return { email_id: id, ticket_no: ticket, queued: llmConfigured() };
 }
 
 // ---------- helpers ----------
@@ -196,7 +240,7 @@ async function stock(db) {
   return rows.map((r) => ({ ...r, pending_demand: demand.get(r.sku)?.qty || 0, pending_tickets: demand.get(r.sku)?.tickets || [], short_by: Math.max(0, (demand.get(r.sku)?.qty || 0) - r.available) }));
 }
 
-async function results(db) {
+export async function results(db) {
   let golden = {};
   try { golden = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'golden_labels.json'), 'utf8')).emails.map((g) => [g.email_id, g])); } catch { /* optional */ }
   const rows = (await db.query('select c.email_id, c.ticket_no, c.intent, c.lane, c.status, c.erp_status, c.model, cu.name as customer_name, c.summary from cases c left join customers cu using (customer_id) order by c.ticket_no')).rows;
@@ -225,6 +269,16 @@ export async function handle(req, res) {
     const cname = cookieName(secure);
     const token = readCookie(req, cname);
 
+    // Machine calls: a mail provider posting new mail, or a scheduler draining the queue.
+    if ((p === '/api/inbound' && req.method === 'POST') || p === '/api/agent/run') {
+      if (bearerOk(req)) {
+        if (p === '/api/inbound') return send(res, 202, await ingest(db, await readBody(req), 'inbound'));
+        inBackground(db);
+        return send(res, 202, await queueStatus(db));
+      }
+      if (p === '/api/inbound') throw httpErr(401, 'Missing or wrong token.');
+    }
+
     if (p === '/api/login' && req.method === 'POST') {
       const b = await readBody(req);
       const r = await login(db, str(b.username, 64), str(b.password, 256));
@@ -240,7 +294,14 @@ export async function handle(req, res) {
     if (!user) throw httpErr(401, 'Please sign in.');
 
     if (p === '/api/me') return send(res, 200, { user, model: llmModel(), auto_commit: AUTO_COMMIT, durable: db.durable, demo_now: DEMO_NOW });
-    if (p === '/api/tickets' && req.method === 'GET') return send(res, 200, await listTickets(db, url, user));
+    if (p === '/api/tickets' && req.method === 'GET') return send(res, 200, { ...(await listTickets(db, url, user)), queue: await queueStatus(db) });
+    if (p === '/api/agent/status') return send(res, 200, await queueStatus(db));
+    if (p === '/api/agent/run' && req.method === 'POST') {
+      const s = await queueStatus(db);
+      if (s.pending) inBackground(db);
+      return send(res, 202, s);
+    }
+    if (p === '/api/emails' && req.method === 'POST') return send(res, 202, await ingest(db, await readBody(req), user.username));
     if (p === '/api/stock') return send(res, 200, await stock(db));
     if (p === '/api/results') return send(res, 200, await results(db));
     if (p === '/api/catalog') return send(res, 200, (await db.query("select p.sku, p.name, p.sell_uom, p.pack, p.list_price, p.status, i.available from products p join inventory i using (sku) order by sku")).rows);
@@ -254,10 +315,10 @@ export async function handle(req, res) {
     }
     if (p === '/api/admin/reset' && req.method === 'POST') {
       if (!CAN.reset(user)) throw httpErr(403, 'Only an Admin can reset the demo.');
-      await db.query("delete from app_meta where k='seed'");
+      await db.query("delete from app_meta where k='seed:v2'");
       ready = false;
       await ensureReady(db);
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, queue: await queueStatus(db) });
     }
 
     const m = p.match(/^\/api\/tickets\/(E\d{3})(?:\/([a-z_]+))?$/);

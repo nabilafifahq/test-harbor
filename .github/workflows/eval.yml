@@ -1,0 +1,38 @@
+name: eval-model
+# Runs the 40 emails through the model agent and scores them against the golden labels.
+# Manual (Actions > eval-model > Run workflow) or by pushing a branch named eval/<anything>.
+# Uses the LLM_API_KEY repository secret; costs a few cents per run on DeepInfra.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model id (comma separated for a fallback chain); empty for the default
+        required: false
+  push:
+    branches: ['eval/**']
+permissions:
+  contents: read
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run 40 emails through the model agent
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ inputs.model }}
+        run: npm run eval
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: eval/

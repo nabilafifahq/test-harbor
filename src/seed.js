@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hashPassword } from './auth.js';
+import { parseEml } from './eml.js';
 
-const TABLES = ['sessions', 'users', 'audit_events', 'outbox', 'comments', 'cases', 'emails', 'sales_order_lines', 'sales_orders', 'incoming_supply', 'inventory', 'customer_prices', 'products', 'ship_to_addresses', 'customer_contacts', 'customers'];
+const TABLES = ['sessions', 'users', 'agent_reads', 'audit_events', 'outbox', 'comments', 'cases', 'emails', 'sales_order_lines', 'sales_orders', 'incoming_supply', 'inventory', 'customer_prices', 'products', 'ship_to_addresses', 'customer_contacts', 'customers'];
 export const DEMO_USERS = [
   { username: 'ops', display_name: 'Jo Park', role: 'ops' },
   { username: 'credit', display_name: 'Rina Hartono', role: 'credit' },
@@ -31,6 +32,15 @@ async function load(q, dir, file, table, cols, conv = {}) {
   }
 }
 
+// The inbox is the folder of raw .eml files; the JSON-lines export is only used when that folder is missing.
+export function readInbox(dataDir) {
+  const dir = path.join(dataDir, 'inbox');
+  if (fs.existsSync(dir)) {
+    return fs.readdirSync(dir).filter((f) => f.endsWith('.eml')).map((f) => ({ email_id: path.basename(f, '.eml'), ...parseEml(fs.readFileSync(path.join(dir, f), 'utf8')) }));
+  }
+  return fs.readFileSync(path.join(dataDir, 'emails.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 export async function seed(q, dataDir, password) {
   await q.exec(TABLES.map((t) => `drop table if exists ${t} cascade;`).join('\n'));
   await q.exec(fs.readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
@@ -44,8 +54,7 @@ export async function seed(q, dataDir, password) {
   await load(q, d, 'incoming_supply.csv', 'incoming_supply', ['supplier_po', 'sku', 'qty', 'expected_date']);
   await load(q, d, 'sales_orders.csv', 'sales_orders', ['so_number', 'customer_id', 'ship_to_id', 'customer_po', 'order_date', 'requested_date', 'status']);
   await load(q, d, 'sales_order_lines.csv', 'sales_order_lines', ['so_number', 'line_no', 'sku', 'qty_ordered', 'qty_shipped', 'unit_price']);
-  const emails = fs.readFileSync(path.join(dataDir, 'emails.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
-    .sort((a, b) => a.received_at.localeCompare(b.received_at));
+  const emails = readInbox(dataDir).sort((a, b) => a.received_at.localeCompare(b.received_at));
   let n = 1001;
   for (const e of emails) await q.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)', [e.email_id, `HP-${n++}`, e.received_at, e.from_name, e.from_email, e.subject, e.body, JSON.stringify(e.attachments || [])]);
   for (const u of DEMO_USERS) await q.query('insert into users (username, display_name, role, password_hash) values ($1,$2,$3,$4)', [u.username, u.display_name, u.role, await hashPassword(password)]);

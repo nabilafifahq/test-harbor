@@ -6,7 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 process.env.PGLITE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hp-'));
-delete process.env.DATABASE_URL; delete process.env.POSTGRES_URL; delete process.env.LLM_BASE_URL;
+delete process.env.DATABASE_URL; delete process.env.POSTGRES_URL; process.env.LLM_MODE = 'off';
 
 const { getDb } = await import('../src/db.js');
 const { runPipeline } = await import('../src/app.js');

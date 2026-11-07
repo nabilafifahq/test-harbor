@@ -28,6 +28,8 @@ create table cases (
 );
 create table comments (id bigserial primary key, email_id text references cases, author text not null, body text not null, kind text not null default 'note', at timestamptz not null default now());
 create table outbox (id bigserial primary key, email_id text references cases, to_email text, subject text, body text, sent_by text, at timestamptz not null default now());
+-- The model agent's reading of each email (read-only work, done in parallel before the checks run in arrival order)
+create table agent_reads (email_id text primary key references emails, status text not null default 'pending', attempts int not null default 0, model text, reading jsonb, trace jsonb not null default '[]', usage jsonb not null default '{}', error text, started_at timestamptz, finished_at timestamptz);
 create table audit_events (id bigserial primary key, at timestamptz not null default now(), actor text not null, actor_type text not null, email_id text, action text not null, detail jsonb not null default '{}');
 
 -- People and sessions
