@@ -23,6 +23,8 @@ const money = (v) => Math.round(v * 100) / 100;
 
 // ---------- one-time setup, safe when several function instances start together ----------
 let ready = false;
+// The seed is tied to the reader: adding a model key (or a replay file) reloads the inbox once and lets the model read it.
+const SEED_KEY = () => `seed:v3:${process.env.AGENT_REPLAY ? 'replay' : llmConfigured() ? 'model' : 'rules'}`;
 export async function runPipeline(db) {
   await seed(db, DATA_DIR, PASSWORD);
   // Replay a recorded model run (scripts/eval.mjs writes it): the same readings and tool traces, no key needed.
@@ -44,14 +46,14 @@ async function ensureReady(db) {
   if (ready) return;
   await db.exec('create table if not exists app_meta (k text primary key, v text, at timestamptz default now())');
   for (let i = 0; i < 55; i++) {
-    const s = (await db.query("select v, at from app_meta where k='seed:v2'")).rows[0];
+    const s = (await db.query("select v, at from app_meta where k=$1", [SEED_KEY()])).rows[0];
     if (s?.v === 'done') { ready = true; return; }
     if (!s || Date.now() - new Date(s.at).getTime() > 120000) {
-      if (s) await db.query("delete from app_meta where k='seed:v2' and v='running'");
-      const claim = await db.query("insert into app_meta (k, v) values ('seed:v2','running') on conflict (k) do nothing returning k");
+      if (s) await db.query("delete from app_meta where k=$1 and v='running'", [SEED_KEY()]);
+      const claim = await db.query("insert into app_meta (k, v) values ($1,'running') on conflict (k) do nothing returning k", [SEED_KEY()]);
       if (claim.rows.length) {
-        try { const r = await runPipeline(db); await db.query("update app_meta set v='done', at=now() where k='seed:v2'"); ready = true; if (r.queued) inBackground(db); return; }
-        catch (e) { await db.query("delete from app_meta where k='seed:v2'"); throw e; }
+        try { const r = await runPipeline(db); await db.query("update app_meta set v='done', at=now() where k=$1", [SEED_KEY()]); ready = true; if (r.queued) inBackground(db); return; }
+        catch (e) { await db.query("delete from app_meta where k=$1", [SEED_KEY()]); throw e; }
       }
     }
     await sleep(1000);
@@ -330,7 +332,7 @@ export async function handle(req, res) {
     }
     if (p === '/api/admin/reset' && req.method === 'POST') {
       if (!CAN.reset(user)) throw httpErr(403, 'Only an Admin can reset the demo.');
-      await db.query("delete from app_meta where k='seed:v2'");
+      await db.query("delete from app_meta where k like 'seed:%'");
       ready = false;
       await ensureReady(db);
       return send(res, 200, { ok: true, queue: await queueStatus(db) });

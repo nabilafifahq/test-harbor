@@ -412,6 +412,8 @@ The demo is hosted on Vercel. For production use:
 | Repository and run instructions | this README |
 | Live URL and logins | [`docs/04-live-url-and-logins.md`](docs/04-live-url-and-logins.md) |
 | Results and agent log | [`docs/05-results-and-agent-log.md`](docs/05-results-and-agent-log.md) |
+| All five as one PDF | [`docs/submission.pdf`](docs/submission.pdf) |
+| Every model eval run | branch [`eval-results`](https://github.com/nabilafifahq/test-harbor/tree/eval-results) |
 
 ## 14. Licences and acknowledgements
 
