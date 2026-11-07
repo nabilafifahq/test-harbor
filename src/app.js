@@ -25,6 +25,14 @@ const money = (v) => Math.round(v * 100) / 100;
 let ready = false;
 export async function runPipeline(db) {
   await seed(db, DATA_DIR, PASSWORD);
+  // Replay a recorded model run (scripts/eval.mjs writes it): the same readings and tool traces, no key needed.
+  if (process.env.AGENT_REPLAY) {
+    for (const r of JSON.parse(fs.readFileSync(process.env.AGENT_REPLAY, 'utf8'))) {
+      await db.query("insert into agent_reads (email_id, status, model, reading, trace, usage, error, finished_at) values ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,now()) on conflict do nothing",
+        [r.email_id, r.status === 'done' ? 'done' : 'failed', r.model, JSON.stringify(r.reading), JSON.stringify(r.trace || []), JSON.stringify(r.usage || {}), r.error]);
+    }
+    return { queued: true };
+  }
   // With a model configured the inbox is queued and read in the background (queue.js).
   if (llmConfigured()) { await enqueue(db); return { queued: true }; }
   const matcher = await buildMatcher(db);
@@ -255,7 +263,7 @@ export async function results(db) {
   const reads = (await db.query('select status, usage from agent_reads')).rows;
   const usage = (k) => reads.reduce((n, x) => n + (Number(x.usage?.[k]) || 0), 0);
   const checks = (await db.query('select checks from cases')).rows.flatMap((x) => x.checks.filter((k) => k.code === 'M01'));
-  const agent = { model: llmModel(), configured: llmConfigured(), read_by_model: reads.filter((x) => x.status === 'done').length, model_failed: reads.filter((x) => x.status === 'failed').length,
+  const agent = { model: (await db.query('select model from agent_reads where model is not null limit 1')).rows[0]?.model || llmModel(), configured: reads.length > 0, read_by_model: reads.filter((x) => x.status === 'done').length, model_failed: reads.filter((x) => x.status === 'failed').length,
     calls: usage('calls'), prompt_tokens: usage('prompt_tokens'), completion_tokens: usage('completion_tokens'), cost_usd: Math.round(usage('cost_usd') * 10000) / 10000,
     readers_compared: checks.length, readers_agree: checks.filter((k) => k.pass).length };
   return { agent, emails: rows.length, lanes: facets(rows, ['lane']).lane, intents: facets(rows, ['intent']).intent, scored: scored.length, lane_agreement: laneMatch, intent_agreement: intentMatch, unsafe_auto_commits: unsafe, missed_auto_commits: missedAuto, orders_written: committed.n, value_written: money(Number(committed.v)), model: rows[0]?.model || 'rules', per };

@@ -2,7 +2,7 @@
 
 | Document | HP-O2C-PB-001 |
 |---|---|
-| Version | 1.0, 6 November 2026 |
+| Version | 1.1, 7 November 2026 |
 | Owner | Nabila |
 | Status | Submitted |
 | Standards | ISO/IEC 25010:2023 quality model for the success measures; OWASP Top 10:2025 and OWASP Top 10 for LLM Applications 2025 for the security controls |
@@ -19,15 +19,15 @@ Forty emails arrived on Monday 2 November between 07:02 and 11:18. Four of them 
 
 An order desk where every email becomes a ticket and an agent does the reading and the lookups.
 
-1. **The agent reads** each email and works out the request: new order, change, cancellation, quote, return, invoice question, complaint, or noise.
-2. **It looks things up** in the ERP through read-only tools: customer from the sender, ship-to, catalog match, contract or list price, stock, incoming supply, credit, order history.
-3. **It drafts** the order (split by delivery site when one email covers several), the change, the cancellation, or the question to send the customer.
-4. **Code decides the lane** with eleven checks. The model never decides whether something is safe.
+1. **New mail is queued** and processed in the background: the morning inbox, a form in the console, or a mail provider's webhook. Nobody waits on a screen.
+2. **A language model reads** each email (DeepSeek V4 Flash on DeepInfra) and works through ten read-only ERP tools: sender to customer, ship-to, catalog search, contract or list price, stock and incoming supply, credit, existing orders, order history. It submits a draft with the request type, the lines per delivery site, the questions it would ask, and a suggested next step with its reasoning.
+3. **A second reader cross-checks it.** Deterministic rules read the same email. If the model fails, the rules reading is used and nothing is written without a person.
+4. **Code decides the lane** with twelve checks. The model never decides whether something is safe.
 5. **People decide the rest** in a console built like an email client: queue by priority and due time, search with operators, filters, a Work next button, and a ticket page that shows the email, the draft, the checks, the agent's steps, and what approval will change before anyone clicks.
 
 ## Where the line sits
 
-**The agent acts alone** when a new order passes all eleven checks: it is a new order; the sender is a registered contact, verified, of an active account; every SKU and quantity was written by the customer (a price the customer states also fails this one); every product is active; stock covers every line; credit holds after the order; the PO is new; nothing needs asking; and the email gives no instructions to the system. Four of the forty emails qualify. These are the orders where a person adds nothing but typing time.
+**The agent acts alone** when a new order passes all twelve checks: it is a new order; the sender is a registered contact, verified, of an active account; every SKU and quantity was written by the customer (a price the customer states also fails this one); every product is active; stock covers every line; credit holds after the order; the PO is new; nothing needs asking; the email gives no instructions to the system; and the model and the rules reader read the same items, quantities and delivery sites. Four of the forty emails qualify. These are the orders where a person adds nothing but typing time.
 
 **A person decides** everything with judgement in it: credit (Credit and AR role), prices that differ from ours, substitutes, unclear units, changes and cancellations of existing orders, returns, unknown senders, stock shortfalls, and injection attempts (Admin role).
 
@@ -37,11 +37,10 @@ The commit is plain code. It runs in one database transaction, re-reads price, s
 
 ## What we did not build
 
-- Live mailbox connection. The 40 emails load from the data pack; replies go to an outbox table.
-- Attachment parsing (E023 refers to a PO that never arrived; the agent asks for it).
+- A direct IMAP or Microsoft Graph mailbox. Mail arrives as `.eml` files, through the console, or through a webhook a mail provider can call; replies go to an outbox table.
+- Reading PDF or spreadsheet attachments (E023 refers to a PO that never arrived; the agent asks for it).
 - Merging same-day follow-ups into the earlier draft. They become linked tickets.
-- Swapping a SKU in the console. Reviewers edit quantities; substitutions go back to the customer.
-- A model by default. The deterministic reader routes all 40 emails as the labels expect; a model can be added through one setting.
+- Letting the model's own questions route a ticket to the customer. They are shown to the reviewer as suggestions; only questions the code raises move a ticket to Waiting.
 
 ## How we would measure it in production
 
@@ -67,7 +66,9 @@ The commit is plain code. It runs in one database transaction, re-reads price, s
 9. Contract prices apply only inside their dates (E024's $70 expired on 30 September).
 10. Auto-replies are never answered, to avoid mail loops.
 11. Demo due times use a fixed clock of 12:00 on 2 November so priorities read correctly.
+12. A same-day add-on that names no order (E026, "add these, sorry I forgot this morning") is a new order linked to the earlier ticket, not a change. Without a reference, changing an order would be a guess.
+13. When the model and the rules reader disagree, a person decides. Two readers agreeing is the bar for writing without one.
 
 ## Hosting today and the path to production
 
-The demo runs on Vercel with Postgres from the Vercel Neon integration. For real use we would move to a company `.com` domain with single sign-on, finer roles and approval limits, an OWASP ASVS level 2 baseline, and hosting on a VPS or Harbor Point's own hardware. The model reader can be a local model (Ollama or llama.cpp) for data that must stay in-house, or an API model through OpenRouter or DeepInfra, always behind the same deterministic checks. Production also needs a live mailbox pipeline with retries and a fallback from model to rules reader, and a short guided onboarding for new reviewers.
+The demo runs on Vercel with Postgres from the Vercel Neon integration. For real use we would move to a company `.com` domain with single sign-on, finer roles and approval limits, an OWASP ASVS level 2 baseline, and hosting on a VPS or Harbor Point's own hardware. The model can move to a local one (Ollama or llama.cpp) for data that must stay in-house, or a second API model can sit in the fallback chain before the rules reader, always behind the same checks and scored with the same eval first. Production also needs a direct mailbox connection feeding the existing queue, a dead-letter view, and a short guided onboarding for new reviewers.

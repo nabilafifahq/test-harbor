@@ -45,6 +45,9 @@ const out = {
 fs.mkdirSync('eval', { recursive: true });
 const file = path.join('eval', `${out.model.replace(/[^a-z0-9.-]+/gi, '_')}.json`);
 fs.writeFileSync(file, JSON.stringify(out, null, 2));
+// The model's raw readings and tool traces, so the run can be replayed without a key: AGENT_REPLAY=<this file> npm start
+const raw = (await db.query('select email_id, status, model, reading, trace, usage, error from agent_reads order by email_id')).rows;
+fs.writeFileSync(file.replace(/\.json$/, '.reads.json'), JSON.stringify(raw));
 const md = [
   `## Model eval: ${out.model}`,
   '',
