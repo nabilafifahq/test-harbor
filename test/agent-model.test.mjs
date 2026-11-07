@@ -30,7 +30,7 @@ function scriptedModel(tweak = () => {}) {
     const r = extract(emails.find((e) => e.email_id === id));
     const draft = {
       intent: r.intent, next_action: r.intent === 'new_order' ? 'create_order' : 'escalate_to_person', customer_id: null,
-      lines: r.lines.map((l) => ({ sku: l.sku || null, qty: l.qty ?? null, unit_as_written: l.unit_text || null, text: l.description || l.sku || '', customer_stated_price: l.customer_stated_price ?? null })),
+      lines: r.lines.map((l) => ({ sku: l.sku || null, qty: l.qty ?? null, unit_as_written: l.unit_text || null, text: `${l.label ? `${l.label}: ` : ''}${l.description || l.sku || ''}`, customer_stated_price: l.customer_stated_price ?? null })),
       customer_po: r.customer_po, order_ref: r.references_so, requested_date_text: r.requested_date_text, questions: [], suspicious_instructions: false, language: r.language, reasoning: 'Scripted.',
     };
     tweak(id, draft);

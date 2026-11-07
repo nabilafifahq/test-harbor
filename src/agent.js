@@ -237,6 +237,10 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
             const byText = l.description ? await T.match_product(l.description.replace(/HPS-\d{4}/g, ''), matcher) : { sku: null };
             const pick = near.find((s) => s === byText.sku) || (near.length === 1 ? near[0] : byText.sku);
             if (pick) { prod = await T.get_product(pick); inferred = true; note = `Customer wrote ${l.sku}, which does not exist. ${pick} is one edit away${byText.sku === pick ? ' and matches the description' : ''}.`; flag('SKU_CORRECTED', note); }
+          } else if (!l.quoted_sku && !l.from_history) {
+            // The model may already have corrected a SKU the customer mistyped: that is still a correction a person confirms.
+            const typo = (email.body.match(/\b[A-Z]{2,4}-\d{3,5}\b/gi) || []).map((x) => x.toUpperCase()).find((x) => x !== prod.sku && editDistance(x, prod.sku) <= 1 && !matcher.products.some((q) => q.sku === x));
+            if (typo) { inferred = true; l.sku_list_line = true; flag('SKU_CORRECTED', `Customer wrote ${typo}, which does not exist. The agent read it as ${prod.sku} (${prod.name}), one edit away.`); }
           }
         } else {
           const m = l.sku_match || await T.match_product(l.description, matcher);
@@ -253,7 +257,7 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
         const unit = String(l.unit_text || '').toLowerCase();
         const caseWord = /^(cs|case|cases|caja|cajas)$/.test(unit);
         const looseUnit = unit && !caseWord && prod.sell_uom === 'CS';
-        const noUnitFreeText = !unit && !l.quoted_sku && !l.from_history && !l.mention_only && prod.sell_uom === 'CS';
+        const noUnitFreeText = !unit && !l.quoted_sku && !l.sku_list_line && !l.from_history && !l.mention_only && prod.sell_uom === 'CS';
         if (looseUnit || noUnitFreeText) { exact = false; flag('UNIT_UNCLEAR', `${prod.name} is sold by the case (${prod.pack}); the email says ${qty} ${unit || 'without a unit'}.`); p.questions.push(`${prod.name} comes in cases of ${prod.pack}. You wrote ${qty} ${unit || ''}. How many cases is that?`.replace(/\s+\./, '.')); }
         if (prod.status !== 'ACTIVE') {
           exact = false;
@@ -326,9 +330,17 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
     check('Q01', 'Nothing to ask the customer', p.questions.length === 0, p.questions.join(' | '));
     if (read?.reading) {
       // Two independent readers: an order is written without a person only when both read the same lines.
-      const sig = (x) => JSON.stringify(x.lines.filter((l) => l.sku).map((l) => [String(l.sku).toUpperCase(), Number(l.qty)]).sort());
+      // Resolve both readings to catalog SKUs the same way (typo within one edit, unambiguous words), minus skipped items.
+      const resolve = (l) => {
+        if (l.sku) { const k = String(l.sku).toUpperCase(); if (matcher.products.some((q) => q.sku === k)) return k; const near = matcher.nearestSkus(k); return near.length === 1 ? near[0] : k; }
+        const m = l.description ? matcher.match(l.description) : null;
+        return m?.sku && !m.ambiguous ? m.sku : null;
+      };
+      const skipped = (k) => [...(ext.exclusions || []), ...(rules.exclusions || [])].some((x) => productTokens(x).some((w) => HEADS.includes(w) && productTokens(matcher.products.find((q) => q.sku === k)?.name || '').includes(w)));
+      const site = (l) => (shipTos.find((x) => x.ship_to_id === l.ship_to_id) || pickShipTo(shipTos, l.label || l.ship_to_hint || email.body))?.ship_to_id;
+      const sig = (x) => JSON.stringify(x.lines.map((l) => [resolve(l), Number(l.qty), site(l)]).filter(([k]) => k && !skipped(k)).sort());
       const agree = rules.intent === ext.intent && sig(rules) === sig(ext);
-      check('M01', 'Model and rules reader read the same request', agree, agree ? 'same intent and lines' : `rules: ${rules.intent} ${sig(rules)}; model: ${ext.intent} ${sig(ext)}`);
+      check('M01', 'Model and rules reader read the same request', agree, agree ? 'same intent, items, quantities and delivery sites' : `rules: ${rules.intent} ${sig(rules)}; model: ${ext.intent} ${sig(ext)}`);
     }
     if (lane !== 'no_action') {
       const green = p.kind === 'order' && checks.every((c) => c.pass) && p.orders.length > 0;
@@ -404,6 +416,34 @@ export async function audit(q, actor, actorType, emailId, action, detail) {
   await q.query('insert into audit_events (actor, actor_type, email_id, action, detail) values ($1,$2,$3,$4,$5::jsonb)', [actor, actorType, emailId, action, JSON.stringify(detail || {})]);
 }
 
+// Prices, stock and credit for a reviewer's edited order, without writing anything.
+export async function previewOrders(q, customerId, orders) {
+  const shipTos = (await q.query('select ship_to_id, name from ship_to_addresses where customer_id=$1', [customerId])).rows;
+  const errors = [];
+  const out = [];
+  for (const o of orders || []) {
+    const st = shipTos.find((x) => x.ship_to_id === o.ship_to_id);
+    if (!st) errors.push(`Delivery address ${o.ship_to_id || '(none)'} does not belong to this customer.`);
+    const lines = [];
+    for (const l of o.lines || []) {
+      const sku = String(l.sku || '').toUpperCase().trim();
+      const qty = Number(l.qty);
+      const prod = sku ? await productBySku(q, sku) : null;
+      if (!prod) { errors.push(`${sku || 'A line'} is not in the catalog.`); continue; }
+      if (!Number.isInteger(qty) || qty <= 0) { errors.push(`${sku}: the quantity must be a whole number above 0.`); continue; }
+      const price = await priceFor(q, customerId, sku);
+      if (prod.status !== 'ACTIVE') errors.push(`${sku} is discontinued and cannot be sold.`);
+      if (qty > prod.available) errors.push(`${sku}: ${qty} asked, ${prod.available} available.`);
+      lines.push({ sku, name: prod.name, qty, sell_uom: prod.sell_uom, pack: prod.pack, unit_price: price.unit_price, price_source: price.source, line_value: money(qty * price.unit_price), available: prod.available, stock_ok: qty <= prod.available, status: prod.status, replaced_by: prod.replaced_by || null });
+    }
+    out.push({ ship_to_id: o.ship_to_id, ship_to_name: st?.name || o.ship_to_id, lines, value: money(lines.reduce((a, x) => a + x.line_value, 0)) });
+  }
+  const total = money(out.reduce((a, o) => a + o.value, 0));
+  const cr = await creditPosition(q, customerId);
+  const after = money(cr.open_balance + cr.open_orders_value + total);
+  return { orders: out, total, credit: { ...cr, order_value: total, exposure_after: after, headroom_after: money(cr.credit_limit - after) }, errors };
+}
+
 export function httpErr(status, message) { const e = new Error(message); e.status = status; return e; }
 
 // ---------- the only write path into the ERP ----------
@@ -460,6 +500,10 @@ export async function commitProposal(db, emailId, { actor, actorType = 'human', 
     } else if (p.kind === 'order') {
       const orders = (edited || p.orders || []).map((o) => ({ ...o, lines: (o.lines || []).filter((l) => Number(l.qty) > 0) })).filter((o) => o.lines.length);
       if (!orders.length) throw httpErr(422, 'There are no lines with a quantity to write.');
+      if (edited) {
+        const own = new Set((await t.query('select ship_to_id from ship_to_addresses where customer_id=$1', [c.customer_id])).rows.map((r) => r.ship_to_id));
+        for (const o of orders) if (!own.has(o.ship_to_id)) errors.push(`Delivery address ${o.ship_to_id} does not belong to this customer`);
+      }
       const soNumbers = [];
       let next = Number((await t.query('select max(cast(substr(so_number,4) as int)) as m from sales_orders')).rows[0].m) + 1;
       const priced = [];

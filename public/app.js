@@ -23,8 +23,10 @@ const FLAG_TEXT = {
   SKU_CORRECTED: ['SKU corrected', 'warn', 'edit_note'], UNIT_UNCLEAR: ['Unit unclear', 'warn', 'help'], AMBIGUOUS_PRODUCT: ['Which item?', 'warn', 'help'],
   DATE_IN_PAST: ['Date passed', 'warn', 'schedule'], MISSING_ATTACHMENT: ['No attachment', 'warn', 'error'], FROM_HISTORY: ['From history', 'warn', 'history'],
   NOTHING_TO_ORDER: ['No items', 'warn', 'help'], DUPLICATE: ['Duplicate', 'info', 'done_all'], LINE_EXCLUDED: ['Line skipped', 'info', 'info'], MODEL_UNAVAILABLE: ['Rules only', 'info', 'info'],
-  ORDER_NOT_FOUND: ['Order not found', 'bad', 'error'],
+  ORDER_NOT_FOUND: ['Order not found', 'bad', 'error'], MODEL_FALLBACK: ['Rules reader used', 'info', 'info'], COMMIT_REFUSED: ['ERP refused', 'bad', 'error'],
+  PROCESSING_ERROR: ['Not processed', 'bad', 'error'],
 };
+const NEXT = { create_order: 'Create the order', change_order: 'Change the order', cancel_order: 'Cancel the order', send_quote: 'Send a quote', ask_customer: 'Ask the customer', route_to_credit_ar: 'Hand to Credit and AR', route_to_sales: 'Hand to sales', escalate_to_person: 'Escalate to a person', close_no_action: 'Close, no action' };
 const SORTS = [['priority', 'Priority, then due time'], ['sla', 'Due soonest'], ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['value', 'Highest value'], ['customer', 'Customer A to Z']];
 const ROLE = { ops: 'Operations', credit: 'Credit and AR', admin: 'Admin' };
 
@@ -160,9 +162,10 @@ function shell(active) {
         <button class="icon-btn" id="me-btn" aria-label="Account: ${esc(me?.user.display_name)}" aria-haspopup="menu"><span class="avatar pic tone-${me?.user.role}">${initials(me?.user.display_name)}</span></button>
       </div>
     </header>
-    <div class="banner" id="banner">${me && !me.durable ? `${icon('info')} Demo storage: the data resets to this morning's inbox when the server restarts.` : ''}</div>
+    <div class="banner" id="banner"></div>
     <nav class="drawer" aria-label="Main">
       <button class="fab" id="next-btn" title="Open the most urgent ticket you can take">${icon('bolt', 'ic-lg')}<span class="lbl">Work next</span></button>
+      <button class="nav-item" id="new-mail" title="Add a new email for the agent">${icon('add')}<span class="lbl">New email</span></button>
       ${VIEWS.map(([k, l, ic]) => `<a class="nav-item" href="#/tickets?view=${k}" ${active === k ? 'aria-current="page"' : ''} title="${l}">${icon(ic)}<span class="lbl">${l}</span><span class="count">${c[k] ?? ''}</span></a>`).join('')}
       <div class="nav-head label-m">Labels</div>
       ${Object.entries(LABELS).filter(([k]) => k !== 'Other').map(([k, col]) => `<a class="nav-item" href="#/tickets?view=all&label=${k.toLowerCase()}" ${active === `label:${k.toLowerCase()}` ? 'aria-current="page"' : ''} title="${k}"><span class="dot" style="background:${col}"></span><span class="lbl">${k}</span><span class="count">${lc[k] ?? ''}</span></a>`).join('')}
@@ -187,6 +190,8 @@ function shell(active) {
     ...(me.user.role === 'admin' ? [{ html: `${icon('refresh')} Reset demo to 07:00`, run: resetDemo }] : []),
     { html: `${icon('logout')} Sign out`, run: async () => { await api('/api/logout', { method: 'POST' }); state.me = null; location.hash = '#/signin'; } },
   ]);
+  $('#new-mail').onclick = openNewEmail;
+  drawBanner();
   $('#next-btn').onclick = () => { const id = state.list?.next_up; if (id) location.hash = `#/t/${id}`; else snack('Nothing waiting for you. Nice.'); };
 }
 
@@ -229,9 +234,98 @@ function openHelp() {
   $('.sheet button', s).focus();
 }
 
+// ---------------------------------------------------------------- background queue and new mail
+function drawBanner() {
+  const el = $('#banner');
+  if (!el) return;
+  const q = state.queue;
+  const parts = [];
+  if (q?.pending) {
+    const pct = Math.round(((q.total - q.pending) / Math.max(q.total, 1)) * 100);
+    parts.push(`<span class="queue-msg">${icon('smart_toy')} The agent is working in the background: ${q.processed} of ${q.total} emails done${q.waiting_for_model ? `, ${q.waiting_for_model} waiting for the model` : ''}. Tickets appear as they finish.</span><span class="qbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span>`);
+  }
+  if (state.me && !state.me.durable) parts.push(`<span>${icon('info')} Demo storage: the data resets to this morning's inbox when the server restarts.</span>`);
+  el.innerHTML = parts.join('');
+  el.classList.toggle('working', Boolean(q?.pending));
+}
+
+let queueTimer = null, lastKick = 0;
+function watchQueue(q) {
+  if (q) state.queue = q;
+  drawBanner();
+  if (!state.queue?.pending || queueTimer) return;
+  const tick = async () => {
+    // The server already works in the background; this only restarts it if a run was cut off.
+    if (Date.now() - lastKick > 60000) { lastKick = Date.now(); api('/api/agent/run', { method: 'POST' }).catch(() => {}); }
+    let s = state.queue;
+    try { s = await api('/api/agent/status'); } catch { /* keep the last status */ }
+    const moved = s.processed !== state.queue.processed;
+    state.queue = s; drawBanner();
+    queueTimer = s.pending ? setTimeout(tick, 4000) : null;
+    const onList = !location.hash || location.hash.startsWith('#/tickets');
+    if (moved && onList) renderList(state.params);
+    if (state.waitFor && moved) {
+      const id = state.waitFor;
+      try { const t = await api(`/api/tickets/${id}`); state.waitFor = null; snack(`${t.ticket_no} is ready: ${t.summary}`, { label: 'Open', run: () => { location.hash = `#/t/${id}`; } }); } catch { /* not processed yet */ }
+    }
+    if (!s.pending) snack('The agent has worked through every email.');
+  };
+  queueTimer = setTimeout(tick, 1500);
+}
+
+function openNewEmail() {
+  const s = document.createElement('div');
+  s.innerHTML = `<div class="scrim"></div><aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="nm-t">
+    <div style="display:flex;align-items:center"><h2 class="title-l" id="nm-t" style="margin:0;flex:1">New email for the agent</h2><button class="icon-btn" id="nm-x" aria-label="Close">${icon('close')}</button></div>
+    <p class="body-s muted">It lands in the inbox like any other order email. The agent reads it in the background and the ticket appears when it is done.</p>
+    <div class="tabs" role="tablist"><button role="tab" aria-selected="true" data-tab="form">Type it</button><button role="tab" aria-selected="false" data-tab="eml">Upload .eml</button></div>
+    <form id="nm-form">
+      <div data-pane="form">
+        <div class="field"><label for="nm-from">From address</label><input id="nm-from" type="email" placeholder="chef@oakandember.example" autocomplete="off"></div>
+        <div class="field"><label for="nm-name">Sender name</label><input id="nm-name" placeholder="Luis Ortega" autocomplete="off"></div>
+        <div class="field"><label for="nm-subj">Subject</label><input id="nm-subj" placeholder="Order for Thursday"></div>
+        <div class="field"><label for="nm-body">Email text</label><textarea id="nm-body" rows="8" placeholder="Hi, please send 4 cases of HPS-1408 and 2 cases of the big toilet paper rolls. PO 7781."></textarea></div>
+        <p class="body-s muted">Known senders to try: chef@oakandember.example, orders@bluefinbistro.example. Any other address is treated as a new prospect.</p>
+      </div>
+      <div data-pane="eml" hidden>
+        <div class="field"><label for="nm-file">.eml file</label><input id="nm-file" type="file" accept=".eml,message/rfc822,text/plain"></div>
+        <div class="field"><label for="nm-raw">Or paste the raw email</label><textarea id="nm-raw" rows="10" placeholder="From: ...&#10;Subject: ...&#10;&#10;..."></textarea></div>
+      </div>
+      <div id="nm-msg" role="alert"></div>
+      <div class="actions"><button class="btn btn-filled" id="nm-send" type="submit">${icon('forward_to_inbox')} Add to inbox</button><button class="btn btn-text" type="button" id="nm-cancel">Cancel</button></div>
+    </form>
+  </aside>`;
+  document.body.append(s);
+  const close = () => s.remove();
+  let tab = 'form';
+  $('.scrim', s).onclick = close; $('#nm-x', s).onclick = close; $('#nm-cancel', s).onclick = close;
+  s.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  $$('[data-tab]', s).forEach((b) => b.onclick = () => { tab = b.dataset.tab; $$('[data-tab]', s).forEach((x) => x.setAttribute('aria-selected', x === b)); $$('[data-pane]', s).forEach((x) => { x.hidden = x.dataset.pane !== tab; }); });
+  $('#nm-file', s).onchange = async (e) => { const f = e.target.files[0]; if (f) $('#nm-raw', s).value = await f.text(); };
+  $('#nm-form', s).onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $('#nm-send', s);
+    const body = tab === 'eml' ? { raw: $('#nm-raw', s).value } : { from_email: $('#nm-from', s).value, from_name: $('#nm-name', s).value, subject: $('#nm-subj', s).value, body: $('#nm-body', s).value };
+    btn.disabled = true; btn.textContent = 'Adding';
+    try {
+      const r = await api('/api/emails', { method: 'POST', body });
+      close();
+      state.waitFor = r.email_id;
+      snack(`${r.ticket_no} is in the inbox. The agent is reading it.`);
+      const q = await api('/api/agent/status').catch(() => null);
+      if (q?.pending) watchQueue(q);
+      else { state.waitFor = null; location.hash = `#/t/${r.email_id}`; }
+    } catch (err) {
+      $('#nm-msg', s).innerHTML = `<p class="err">${icon('error')} ${esc(err.message)}</p>`;
+      btn.disabled = false; btn.innerHTML = `${icon('forward_to_inbox')} Add to inbox`;
+    }
+  };
+  $('#nm-from', s).focus();
+}
+
 async function resetDemo() {
   if (!confirmText('Reset all tickets, orders and stock to the 07:00 snapshot? Everyone gets signed out.')) return;
-  snack('Resetting the demo. This takes a few seconds.');
+  snack('Resetting the demo. The agent then reads the inbox again in the background.');
   await api('/api/admin/reset', { method: 'POST' }).catch((e) => snack(e.message));
   location.hash = '#/signin';
 }
@@ -261,8 +355,10 @@ async function renderList(params) {
     return;
   }
   state.list = data;
+  if (data.queue) state.queue = data.queue;
   shell(active);
   drawList();
+  watchQueue(data.queue);
 }
 
 function drawList() {
@@ -313,7 +409,7 @@ function drawList() {
           <span>${t.assignee ? `<span class="avatar sm" title="${esc(t.assignee_name)}">${initials(t.assignee_name)}</span>` : ''}</span>
         </li>`;
       }).join('')}
-    </ul>` : `<div class="empty">${icon(p.q ? 'search' : 'task_alt')}<div class="title-m">${p.q ? 'No tickets match that search.' : `Nothing in ${esc(viewName)}.`}</div><div class="muted">${p.q ? 'Try fewer words, or one of the operators in the search box.' : 'New tickets appear here as emails arrive.'}</div></div>`}`;
+    </ul>` : `<div class="empty">${icon(p.q ? 'search' : 'task_alt')}<div class="title-m">${p.q ? 'No tickets match that search.' : state.queue?.pending ? 'The agent is reading the inbox.' : `Nothing in ${esc(viewName)}.`}</div><div class="muted">${p.q ? 'Try fewer words, or one of the operators in the search box.' : 'New tickets appear here as the agent finishes each email.'}</div></div>`}`;
 
   $$('[data-filter]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const k = b.dataset.filter; openMenu(b, [{ html: 'Any', checked: !p[k], run: () => go({ [k]: '', page: 1 }) }, ...opts[k].map(([v, l]) => ({ html: esc(l), checked: p[k] === v, run: () => go({ [k]: v, page: 1 }) }))], 'left'); });
   $('#clear-filters')?.addEventListener('click', () => go({ priority: '', status: '', label: '', flag: '', page: 1 }));
@@ -353,29 +449,65 @@ async function renderTicket(id) {
   const committed = t.erp_status === 'committed';
   const roleNeeded = flags.some((f) => f.code === 'SECURITY_INJECTION') ? 'admin' : flags.some((f) => ['CREDIT_BLOCK', 'PRICE_DISPUTE'].includes(f.code)) ? 'credit' : null;
 
-  const ordersHtml = (p.orders || []).map((o, oi) => `
-    <h3 class="title-s" style="margin:16px 0 4px">${p.orders.length > 1 ? `Order ${oi + 1} of ${p.orders.length}: ` : ''}deliver to ${esc(o.ship_to_name)} <span class="muted">(${o.ship_to_id})</span></h3>
-    <div style="overflow-x:auto"><table>
-      <thead><tr><th>SKU</th><th>Item</th><th class="num">Qty</th><th class="num">Unit price</th><th>Price from</th><th class="num">Available</th><th class="num">Line total</th></tr></thead>
-      <tbody>${o.lines.map((l, li) => `<tr>
-        <td><b>${l.sku}</b>${l.inferred ? `<br><span class="tag warn" title="Matched from: ${esc(l.from_text || '')}">${icon('edit_note')} read from text</span>` : ''}</td>
-        <td>${esc(l.name)}<br><span class="body-s muted">${esc(l.pack)}${l.status !== 'ACTIVE' ? ` · <span style="color:var(--error)">discontinued${l.replaced_by ? `, successor ${l.replaced_by}` : ''}</span>` : ''}</span></td>
-        <td class="num">${editable ? `<input class="qty" type="number" min="0" step="1" inputmode="numeric" data-o="${oi}" data-l="${li}" value="${l.qty}" aria-label="Quantity of ${l.sku}">` : l.qty} <span class="body-s muted">${l.sell_uom}</span></td>
-        <td class="num">${money(l.unit_price)}</td>
-        <td>${l.price_source === 'contract' ? '<span class="tag ok">Contract</span>' : '<span class="tag">List</span>'}</td>
-        <td class="num" style="${l.stock_ok ? '' : 'color:var(--error);font-weight:650'}">${l.available}</td>
-        <td class="num">${money(l.line_value)}</td></tr>`).join('')}
-      </tbody></table></div>`).join('');
-
-  const creditHtml = cr ? (() => {
-    const lim = cr.credit_limit || 1;
-    const used = Math.min(100, ((cr.open_balance + cr.open_orders_value) / lim) * 100);
-    const thisPct = Math.max(0, Math.min(100 - used, (cr.order_value / lim) * 100));
-    const over = cr.headroom_after < 0;
+  // Reviewer edits: items, quantities and delivery address. Prices always come from the server.
+  if (editable && !state.catalog) state.catalog = await api('/api/catalog').catch(() => []);
+  const draft = JSON.parse(JSON.stringify(p.orders || []));
+  let view = { orders: p.orders || [], total: p.total, credit: cr, errors: [], dirty: false };
+  const cat = (sku) => (state.catalog || []).find((c) => c.sku === sku);
+  const lineRow = (l, oi, li) => {
+    const info = view.orders[oi]?.lines.find((x) => x.sku === l.sku) || {};
+    const c = cat(l.sku) || {};
+    const status = info.status || c.status;
+    const price = info.unit_price;
+    const avail = info.available ?? c.available;
+    return `<tr>
+      <td>${editable ? `<input class="sku" list="catalog" data-o="${oi}" data-l="${li}" value="${esc(l.sku)}" aria-label="SKU" spellcheck="false">` : `<b>${l.sku}</b>`}${l.inferred ? `<br><span class="tag warn" title="Matched from: ${esc(l.from_text || '')}">${icon('edit_note')} read from text</span>` : ''}</td>
+      <td>${esc(info.name || c.name || (l.sku ? 'Not in the catalog' : 'Type a SKU'))}<br><span class="body-s muted">${esc(info.pack || c.pack || '')}${status && status !== 'ACTIVE' ? ` · <span style="color:var(--error)">discontinued${info.replaced_by ? `, successor ${info.replaced_by}` : ''}</span>` : ''}</span></td>
+      <td class="num">${editable ? `<input class="qty" type="number" min="0" step="1" inputmode="numeric" data-o="${oi}" data-l="${li}" value="${l.qty}" aria-label="Quantity of ${esc(l.sku)}">` : l.qty} <span class="body-s muted">${info.sell_uom || c.sell_uom || ''}</span></td>
+      <td class="num">${price != null ? money(price) : '<span class="body-s muted">after check</span>'}</td>
+      <td>${info.price_source === 'contract' ? '<span class="tag ok">Contract</span>' : info.price_source ? '<span class="tag">List</span>' : ''}</td>
+      <td class="num" style="${avail != null && avail < l.qty ? 'color:var(--error);font-weight:650' : ''}">${avail ?? ''}</td>
+      <td class="num">${price != null ? money(price * l.qty) : ''}</td>
+      ${editable ? `<td><button class="icon-btn rm-line" data-o="${oi}" data-l="${li}" aria-label="Remove ${esc(l.sku || 'this line')}">${icon('delete')}</button></td>` : ''}</tr>`;
+  };
+  const creditMarkup = (c) => {
+    if (!c) return '';
+    const lim = c.credit_limit || 1;
+    const used = Math.min(100, ((c.open_balance + c.open_orders_value) / lim) * 100);
+    const thisPct = Math.max(0, Math.min(100 - used, (c.order_value / lim) * 100));
+    const over = c.headroom_after < 0;
     return `<div class="title-s" style="margin-top:16px">Credit after this order</div>
-      <div class="meter" role="img" aria-label="Credit used ${money(cr.exposure_after)} of ${money(cr.credit_limit)}"><i class="used" style="width:${used}%"></i><i class="${over ? 'over' : 'this'}" style="width:${over ? 100 - used : thisPct}%"></i></div>
-      <div class="body-s muted">Open balance ${money(cr.open_balance)} + open orders ${money(cr.open_orders_value)} + this order ${money(cr.order_value)} = <b style="color:${over ? 'var(--error)' : 'inherit'}">${money(cr.exposure_after)}</b> of ${money(cr.credit_limit)} limit${over ? `, <b style="color:var(--error)">${money(-cr.headroom_after)} over</b>` : `, ${money(cr.headroom_after)} left`}. Account ${esc(cr.status)}.</div>`;
-  })() : '';
+      <div class="meter" role="img" aria-label="Credit used ${money(c.exposure_after)} of ${money(c.credit_limit)}"><i class="used" style="width:${used}%"></i><i class="${over ? 'over' : 'this'}" style="width:${over ? 100 - used : thisPct}%"></i></div>
+      <div class="body-s muted">Open balance ${money(c.open_balance)} + open orders ${money(c.open_orders_value)} + this order ${money(c.order_value)} = <b style="color:${over ? 'var(--error)' : 'inherit'}">${money(c.exposure_after)}</b> of ${money(c.credit_limit)} limit${over ? `, <b style="color:var(--error)">${money(-c.headroom_after)} over</b>` : `, ${money(c.headroom_after)} left`}. Account ${esc(c.status)}.</div>`;
+  };
+  const ordersMarkup = () => `${(editable ? draft : view.orders).map((o, oi, all) => `
+    <h3 class="title-s" style="margin:16px 0 4px">${all.length > 1 ? `Order ${oi + 1} of ${all.length}: ` : ''}deliver to ${editable && t.ship_tos.length ? `<select class="shipto" data-o="${oi}" aria-label="Delivery address for order ${oi + 1}">${t.ship_tos.map((x) => `<option value="${x.ship_to_id}" ${x.ship_to_id === o.ship_to_id ? 'selected' : ''}>${esc(x.name)} (${x.ship_to_id})</option>`).join('')}</select>` : `${esc(o.ship_to_name)} <span class="muted">(${o.ship_to_id})</span>`}</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>SKU</th><th>Item</th><th class="num">Qty</th><th class="num">Unit price</th><th>Price from</th><th class="num">Available</th><th class="num">Line total</th>${editable ? '<th><span class="sr-only">Remove</span></th>' : ''}</tr></thead>
+      <tbody>${o.lines.map((l, li) => lineRow(l, oi, li)).join('')}</tbody></table></div>
+    ${editable ? `<button class="btn btn-text add-line" data-o="${oi}">${icon('playlist_add')} Add a line</button>` : ''}`).join('')}
+    ${view.total != null && view.orders.length ? `<div class="num title-m" style="margin-top:12px">Total ${money(view.total)} USD${view.dirty ? ' <span class="body-s muted">before your edits</span>' : ''}</div>` : ''}
+    ${creditMarkup(view.credit)}
+    ${view.errors.length ? `<div class="callout bad" style="margin-top:12px">${icon('error')}<div>${view.errors.map(esc).join('<br>')}</div></div>` : ''}
+    ${editable ? `<div class="actions"><button class="btn btn-tonal" id="check-edits">${icon('rule')} Check prices, stock and credit</button>${view.dirty ? '<span class="body-s muted">Edited. The ERP checks everything again when you approve.</span>' : ''}</div>` : ''}`;
+  const drawOrders = (focus) => {
+    const box = $('#orders');
+    if (!box) return;
+    box.innerHTML = ordersMarkup();
+    const at = (el) => [Number(el.dataset.o), Number(el.dataset.l)];
+    $$('.sku', box).forEach((i) => i.onchange = () => { const [o, l] = at(i); draft[o].lines[l].sku = i.value.toUpperCase().trim(); draft[o].lines[l].inferred = false; view.dirty = true; drawOrders(); });
+    $$('.qty', box).forEach((i) => i.oninput = () => { const [o, l] = at(i); draft[o].lines[l].qty = Number(i.value); view.dirty = true; });
+    $$('.rm-line', box).forEach((b) => b.onclick = () => { const [o, l] = at(b); draft[o].lines.splice(l, 1); view.dirty = true; drawOrders(); });
+    $$('.add-line', box).forEach((b) => b.onclick = () => { const o = Number(b.dataset.o); draft[o].lines.push({ sku: '', qty: 1 }); view.dirty = true; drawOrders(`.sku[data-o="${o}"][data-l="${draft[o].lines.length - 1}"]`); });
+    $$('.shipto', box).forEach((sel) => sel.onchange = () => { draft[Number(sel.dataset.o)].ship_to_id = sel.value; view.dirty = true; });
+    $('#check-edits', box)?.addEventListener('click', async (e) => {
+      e.currentTarget.disabled = true;
+      try { const r = await api(`/api/tickets/${id}/preview`, { method: 'POST', body: { orders: draft } }); view = { orders: r.orders, total: r.total, credit: r.credit, errors: r.errors, dirty: false }; }
+      catch (err) { view.errors = [err.message]; }
+      drawOrders();
+    });
+    if (focus) $(focus, box)?.focus();
+  };
 
   const changeHtml = p.kind === 'change' && p.target ? `
     <p>Change to <b>${p.target.so_number}</b> (PO ${esc(p.target.customer_po)}), status <b>${esc(p.target.status)}</b>.</p>
@@ -389,7 +521,7 @@ async function renderTicket(id) {
     <div class="consequence" id="consequence">
       <div class="title-s">${icon('info')} What approving does</div>
       <ul>
-        ${p.kind === 'order' ? `<li>Writes ${p.orders.length} sales order${p.orders.length > 1 ? 's' : ''} for ${esc(t.customer_name)} into the ERP, status OPEN, PO ${esc(p.customer_po || 'none')}.</li><li>Allocates the stock above. Prices are looked up again at that moment; your edits only change quantities.</li>` : ''}
+        ${p.kind === 'order' ? `<li>Writes ${p.orders.length} sales order${p.orders.length > 1 ? 's' : ''} for ${esc(t.customer_name)} into the ERP, status OPEN, PO ${esc(p.customer_po || 'none')}.</li><li>Allocates the stock above. Prices are looked up again at that moment; your edits can change items, quantities and the delivery address, never prices.</li>` : ''}
         ${p.kind === 'change' ? `<li>Updates ${p.target?.so_number} in place and allocates the extra stock.</li>` : ''}
         ${p.kind === 'cancel' ? `<li>Sets ${p.target?.so_number} to CANCELLED and releases its stock. This cannot be undone from here.</li>` : ''}
         ${cr && cr.headroom_after < 0 ? `<li style="color:var(--error)">Goes ${money(-cr.headroom_after)} over the credit limit. Only Credit and AR can release it, with a reason.</li>` : ''}
@@ -405,6 +537,9 @@ async function renderTicket(id) {
       <div id="act-msg" role="alert"></div>
     </div>` : roleNeeded && !committed && !['resolved', 'closed'].includes(t.status) ? `<div class="callout info">${icon('lock')}<div>This ticket needs the <b>${ROLE[roleNeeded]}</b> role to approve. You can still assign it, add a note or reply to the customer.</div></div>` : '';
 
+  const ag = p.agent;
+  const steps = (t.trace || []).filter((x) => x.tool !== 'model_turn');
+  const modelSteps = steps.filter((x) => x.by === 'model' && !['submit_draft', 'model_error'].includes(x.tool));
   const assigneeName = users.find((u) => u.username === t.assignee)?.display_name;
   const auditRows = [...t.audit.map((a) => ({ at: a.at, who: a.actor, type: a.actor_type, what: a.action.replace(/_/g, ' '), detail: a.detail })), ...t.comments.map((c) => ({ at: c.at, who: c.display_name || c.author, type: 'note', what: 'note', body: c.body })), ...t.outbox.map((o) => ({ at: o.at, who: o.sent_by, type: 'human', what: 'reply queued', body: o.body }))].sort((a, b) => new Date(a.at) - new Date(b.at));
 
@@ -437,10 +572,9 @@ async function renderTicket(id) {
         </section>
         ${(p.orders?.length || changeHtml || cancelHtml) ? `<section class="card" aria-label="Proposal">
           <h2>${icon(p.kind === 'cancel' ? 'cancel' : p.kind === 'change' ? 'swap_horiz' : 'shopping_cart')} ${p.kind === 'quote' ? 'Quote draft' : p.kind === 'change' ? 'Proposed change' : p.kind === 'cancel' ? 'Proposed cancellation' : 'Proposed order'}</h2>
-          ${ordersHtml}${changeHtml}${cancelHtml}
-          ${p.total != null && p.orders?.length ? `<div class="num title-m" style="margin-top:12px">Total ${money(p.total)} USD</div>` : ''}
-          ${creditHtml}
-          ${consequence}
+          ${changeHtml}${cancelHtml}
+          <div id="orders">${ordersMarkup()}</div>
+          ${consequence}${editable ? `<datalist id="catalog">${(state.catalog || []).filter((c) => c.status === 'ACTIVE').map((c) => `<option value="${c.sku}">${esc(c.name)} · ${esc(c.pack)}</option>`).join('')}</datalist>` : ''}
         </section>` : consequence ? `<section class="card">${consequence}</section>` : ''}
         <section class="card" aria-label="Reply">
           <h2>${icon('send')} ${p.questions?.length ? 'Ask the customer' : 'Reply to the customer'}</h2>
@@ -461,9 +595,15 @@ async function renderTicket(id) {
           ${t.checks.length ? `<ul class="checks">${t.checks.map((c) => `<li>${icon(c.pass ? 'check_circle' : 'cancel', c.pass ? 'pass' : 'fail')}<span>${esc(c.label)}${c.detail && !c.pass ? `<br><span class="muted">${esc(c.detail)}</span>` : ''}</span></li>`).join('')}</ul>
           <p class="body-s muted">${t.lane === 'auto_committed' ? 'All checks passed, so the agent wrote the order on its own.' : 'A ticket is written to the ERP on its own only when every check passes.'}</p>` : '<p class="muted body-s">No ERP checks for this kind of email.</p>'}
         </section>
-        <section class="card"><h2>${icon('support_agent')} Agent steps</h2>
-          <ol class="timeline">${t.trace.map((s) => `<li><b>${esc(s.tool.replace(/_/g, ' '))}</b><details><summary>input and output</summary><pre>${esc(JSON.stringify({ input: s.input, output: s.output }, null, 2))}</pre></details></li>`).join('')}</ol>
-          <p class="body-s muted">Reader: ${esc(t.model === 'rules' ? 'deterministic rules (no model configured)' : t.model)}. All tools are read-only.</p>
+        <section class="card"><h2>${icon('smart_toy')} Agent run</h2>
+          ${ag ? `<dl class="kv"><dt>Model</dt><dd>${esc(ag.model)}</dd><dt>Suggests</dt><dd>${ag.next_action ? `<span class="tag info">${esc(NEXT[ag.next_action] || ag.next_action)}</span>` : '<span class="muted">none</span>'}</dd>
+            <dt>Work</dt><dd>${ag.usage?.calls || 0} model calls, ${modelSteps.length} tool calls, ${((ag.usage?.prompt_tokens || 0) + (ag.usage?.completion_tokens || 0)).toLocaleString('en-US')} tokens${ag.usage?.cost_usd != null ? `, ${ag.usage.cost_usd.toFixed(4)} USD` : ''}, ${((ag.usage?.ms || 0) / 1000).toFixed(1)} s</dd></dl>
+            ${ag.reasoning ? `<blockquote class="why">${esc(ag.reasoning)}</blockquote>` : ''}
+            ${ag.used ? '' : `<div class="callout info">${icon('info')}<div>The model did not finish, so the rules reader read this email and nothing is written without a person.</div></div>`}
+            <p class="body-s muted">The model suggests; plain code runs the checks and picks the lane. All tools are read-only.</p>`
+          : '<p class="body-s muted">Read by the rules reader. No model is configured on this server.</p>'}
+          <div class="title-s" style="margin-top:12px">Steps</div>
+          <ol class="timeline">${steps.map((x) => `<li class="${x.by === 'model' ? 'model' : ''}"><span class="tag ${x.by === 'model' ? 'info' : ''}">${x.by === 'model' ? 'model' : 'code'}</span> <b>${esc(x.tool.replace(/_/g, ' '))}</b>${x.input && Object.keys(x.input).length ? ` <span class="body-s muted">${esc(Object.values(x.input).join(', ').slice(0, 60))}</span>` : ''}<details><summary>input and output</summary><pre>${esc(JSON.stringify({ input: x.input, output: x.output }, null, 2))}</pre></details></li>`).join('')}</ol>
         </section>
         <section class="card"><h2>${icon('history')} Activity</h2>
           <ol class="timeline">${auditRows.map((a) => `<li class="${a.type === 'human' || a.type === 'note' ? 'human' : ''}"><b>${esc(a.who)}</b> ${esc(a.what)} <span class="body-s muted">${time(a.at)}</span>${a.body ? `<div class="body-s" style="white-space:pre-wrap">${esc(a.body)}</div>` : a.detail && Object.keys(a.detail).length ? `<details><summary>details</summary><pre>${esc(JSON.stringify(a.detail, null, 2))}</pre></details>` : ''}</li>`).join('')}</ol>
@@ -474,6 +614,7 @@ async function renderTicket(id) {
     </div>
   </div>`;
 
+  drawOrders();
   const msg = (text, ok) => { const el = $('#act-msg'); if (el) el.innerHTML = `<p class="err" style="${ok ? 'color:var(--success)' : ''}">${icon(ok ? 'check_circle' : 'error')} ${esc(text)}</p>`; };
   $('#approve')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -482,9 +623,8 @@ async function renderTicket(id) {
     if ((roleNeeded === 'credit' || p.kind === 'cancel') && !reason) { msg('Add a reason first. It goes into the audit log.'); $('#reason').focus(); return; }
     let orders;
     if (editable) {
-      orders = JSON.parse(JSON.stringify(p.orders));
-      $$('.qty').forEach((i) => { orders[i.dataset.o].lines[i.dataset.l].qty = Number(i.value); });
-      if ($$('.qty').some((i) => !Number.isInteger(Number(i.value)) || Number(i.value) < 0)) { msg('Quantities must be whole numbers.'); return; }
+      orders = draft.map((o) => ({ ship_to_id: o.ship_to_id, lines: o.lines.filter((l) => l.sku).map((l) => ({ sku: l.sku, qty: Number(l.qty) })) }));
+      if (orders.some((o) => o.lines.some((l) => !Number.isInteger(l.qty) || l.qty < 0))) { msg('Quantities must be whole numbers.'); return; }
     }
     btn.disabled = true; btn.textContent = 'Writing to the ERP';
     try {
@@ -552,7 +692,8 @@ async function renderResults() {
   const r = await api('/api/results');
   const laneName = { auto_committed: 'Auto-processed', needs_review: 'Needs review', waiting_on_customer: 'Ask customer', no_action: 'No action' };
   main.innerHTML = `<div class="page"><h1 class="title-l">Results on the 2 November inbox</h1>
-    <p class="muted">How the agent routed each of the 40 emails, compared with the hand-checked labels in <code>data/golden_labels.json</code>. Reader: ${esc(r.model === 'rules' ? 'deterministic rules, no model' : r.model)}.</p>
+    <p class="muted">How the agent routed each of the 40 emails, compared with the hand-checked labels in <code>data/golden_labels.json</code>. Reader: ${esc(r.agent.configured ? `${r.agent.model}, checked by the rules reader` : 'rules reader, no model configured')}.</p>
+    ${r.agent.configured ? `<div class="callout info">${icon('smart_toy')}<div>Model <b>${esc(r.agent.model)}</b> read ${r.agent.read_by_model} emails (${r.agent.model_failed} fell back to the rules reader) in ${r.agent.calls} model calls and ${(r.agent.prompt_tokens + r.agent.completion_tokens).toLocaleString('en-US')} tokens, ${r.agent.cost_usd} USD. Model and rules reader read the same request on ${r.agent.readers_agree} of ${r.agent.readers_compared} emails where both apply.</div></div>` : ''}
     <div class="kpis">
       <div class="kpi"><b>${r.lane_agreement}/${r.scored}</b>routing matches the labels</div>
       <div class="kpi"><b>${r.unsafe_auto_commits}</b>orders written that should have waited (target 0)</div>

@@ -172,6 +172,7 @@ export function readingToExtraction(d, email) {
       unit_text: l.unit_as_written || '',
       description: l.text || '',
       ship_to_id: l.ship_to_id || null,
+      label: l.ship_to_id ? null : (String(l.text || '').match(/^([^:\n]{2,40}):/)?.[1] || null), // a site named before a colon
       customer_stated_price: l.customer_stated_price ?? null,
       from_history: Boolean(l.from_history),
       quoted_sku: Boolean(l.sku && body.toUpperCase().includes(String(l.sku).toUpperCase())),

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
 import { seed } from './seed.js';
-import { processEmail, commitProposal, audit, buildMatcher, httpErr, PRIORITY_RANK, DEMO_NOW } from './agent.js';
+import { processEmail, commitProposal, previewOrders, audit, buildMatcher, httpErr, PRIORITY_RANK, DEMO_NOW } from './agent.js';
 import { login, logout, sessionUser, readCookie, cookieName, CAN, SESSION_ABSOLUTE_MS } from './auth.js';
 import { InvertedIndex, MinHeap, sortBy, parseQuery, facets } from './algo.js';
 import { llmModel, llmConfigured } from './llm.js';
@@ -217,14 +217,15 @@ async function ticketDetail(db, id, user) {
   const c = (await db.query('select c.*, cu.name as customer_name, cu.payment_terms, cu.credit_limit, cu.open_balance, cu.status as customer_status from cases c left join customers cu using (customer_id) where email_id=$1', [id])).rows[0];
   if (!c) throw httpErr(404, 'Ticket not found.');
   const e = (await db.query('select * from emails where email_id=$1', [id])).rows[0];
-  const [a, m, o, users] = await Promise.all([
+  const [a, m, o, users, shipTos] = await Promise.all([
     db.query('select * from audit_events where email_id=$1 order by id', [id]),
     db.query('select m.*, u.display_name from comments m left join users u on u.username=m.author where email_id=$1 order by id', [id]),
     db.query('select * from outbox where email_id=$1 order by id', [id]),
     db.query('select username, display_name, role from users order by username'),
+    db.query('select ship_to_id, name, address, is_default from ship_to_addresses where customer_id=$1 order by ship_to_id', [c.customer_id]),
   ]);
   return {
-    ...c, email: e, audit: a.rows, comments: m.rows, outbox: o.rows, users: users.rows,
+    ...c, email: e, audit: a.rows, comments: m.rows, outbox: o.rows, users: users.rows, ship_tos: shipTos.rows,
     can: { approve: CAN.approve(user, c) && c.erp_status !== 'committed' && ['order', 'change', 'cancel'].includes(c.proposal.kind) && !['resolved', 'closed'].includes(c.status), reset: CAN.reset(user) },
   };
 }
@@ -251,7 +252,13 @@ export async function results(db) {
   const unsafe = scored.filter((r) => r.lane === 'auto_committed' && r.expected_lane !== 'auto_committed').length;
   const missedAuto = scored.filter((r) => r.expected_lane === 'auto_committed' && r.lane !== 'auto_committed').length;
   const committed = (await db.query("select coalesce(sum(l.qty_ordered*l.unit_price),0) as v, count(distinct o.so_number)::int as n from sales_orders o join sales_order_lines l using (so_number) where o.source_email is not null")).rows[0];
-  return { emails: rows.length, lanes: facets(rows, ['lane']).lane, intents: facets(rows, ['intent']).intent, scored: scored.length, lane_agreement: laneMatch, intent_agreement: intentMatch, unsafe_auto_commits: unsafe, missed_auto_commits: missedAuto, orders_written: committed.n, value_written: money(Number(committed.v)), model: rows[0]?.model || 'rules', per };
+  const reads = (await db.query('select status, usage from agent_reads')).rows;
+  const usage = (k) => reads.reduce((n, x) => n + (Number(x.usage?.[k]) || 0), 0);
+  const checks = (await db.query('select checks from cases')).rows.flatMap((x) => x.checks.filter((k) => k.code === 'M01'));
+  const agent = { model: llmModel(), configured: llmConfigured(), read_by_model: reads.filter((x) => x.status === 'done').length, model_failed: reads.filter((x) => x.status === 'failed').length,
+    calls: usage('calls'), prompt_tokens: usage('prompt_tokens'), completion_tokens: usage('completion_tokens'), cost_usd: Math.round(usage('cost_usd') * 10000) / 10000,
+    readers_compared: checks.length, readers_agree: checks.filter((k) => k.pass).length };
+  return { agent, emails: rows.length, lanes: facets(rows, ['lane']).lane, intents: facets(rows, ['intent']).intent, scored: scored.length, lane_agreement: laneMatch, intent_agreement: intentMatch, unsafe_auto_commits: unsafe, missed_auto_commits: missedAuto, orders_written: committed.n, value_written: money(Number(committed.v)), model: rows[0]?.model || 'rules', per };
 }
 
 // ---------- router ----------
@@ -330,11 +337,20 @@ export async function handle(req, res) {
       const t = (await db.query('select * from cases where email_id=$1', [id])).rows[0];
       if (!t) throw httpErr(404, 'Ticket not found.');
       const touch = async (status) => db.query("update cases set status=$2, assignee=coalesce(assignee,$3), row_version=row_version+1, updated_at=now() where email_id=$1", [id, status, user.username]);
+      if (action === 'preview') {
+        if (!t.customer_id) throw httpErr(422, 'There is no customer on this ticket.');
+        return send(res, 200, await previewOrders(db, t.customer_id, Array.isArray(b.orders) ? b.orders : []));
+      }
       if (action === 'approve') {
         if (!CAN.approve(user, t)) throw httpErr(403, t.flags.some((f) => f.code === 'SECURITY_INJECTION') ? 'This ticket has a security flag. Only an Admin can approve it.' : 'Credit and price exceptions need the Credit and AR role.');
         try {
           const r = await commitProposal(db, id, { actor: user.username, actorType: 'human', role: user.role, orders: Array.isArray(b.orders) ? b.orders : undefined, reason: str(b.reason, 500), creditOverride: Boolean(b.credit_override), expectedVersion: b.row_version });
           await db.query('update cases set assignee=coalesce(assignee,$2) where email_id=$1', [id, user.username]);
+          if (Array.isArray(b.orders) && !r.already) {
+            const flat = (os) => (os || []).flatMap((o) => (o.lines || []).filter((l) => Number(l.qty) > 0).map((l) => `${o.ship_to_id} ${String(l.sku).toUpperCase()} x ${Number(l.qty)}`)).sort();
+            const before = flat(t.proposal.orders), after = flat(b.orders);
+            if (JSON.stringify(before) !== JSON.stringify(after)) await audit(db, user.username, 'human', id, 'reviewer_edited', { removed: before.filter((x) => !after.includes(x)), added: after.filter((x) => !before.includes(x)) });
+          }
           return send(res, 200, r);
         } catch (e) {
           if (e.audit) await audit(db, user.username, 'human', id, 'commit_refused', { errors: e.audit.errors });

@@ -36,28 +36,29 @@ export async function runAgentQueue(db, { budgetMs = Number(process.env.AGENT_BU
   const deadline = Date.now() + budgetMs;
   const matcher = await buildMatcher(db);
 
-  if (llmConfigured()) {
-    // A wave starts only when there is room for a slow email to finish.
-    while (deadline - Date.now() > Math.min(100000, budgetMs / 2)) {
-      const claimed = (await db.query(`update agent_reads set status='running', started_at=now(), attempts=attempts+1
-          where email_id in (select r.email_id from agent_reads r join emails e using (email_id)
-            where r.status='pending' or (r.status='running' and r.started_at < now() - interval '5 minutes')
-            order by e.received_at limit $1 for update skip locked)
-          returning email_id, attempts`, [concurrency])).rows;
-      if (!claimed.length) break;
-      await Promise.all(claimed.map(async ({ email_id, attempts }) => {
-        const e = (await db.query('select * from emails where email_id=$1', [email_id])).rows[0];
-        const r = await modelRead(db, { ...e, received_at: iso(e.received_at) }, matcher, { budgetMs: Math.min(120000, deadline - Date.now() - 5000), chatFn });
-        // One retry for a failed read; after that the rules reader takes the email.
-        const status = r.reading ? 'done' : attempts < 2 ? 'pending' : 'failed';
-        await db.query('update agent_reads set status=$2, model=$3, reading=$4::jsonb, trace=$5::jsonb, usage=$6::jsonb, error=$7, finished_at=now() where email_id=$1',
-          [email_id, status, r.model, JSON.stringify(r.reading || null), JSON.stringify(r.trace), JSON.stringify(r.usage), r.error || null]);
-      }));
-    }
-  }
+  // Phase A: claim a wave of emails and let the model read them in parallel.
+  const readWave = async () => {
+    if (!llmConfigured() || deadline - Date.now() < Math.min(100000, budgetMs / 2)) return 0; // room for a slow email
+    const claimed = (await db.query(`update agent_reads set status='running', started_at=now(), attempts=attempts+1
+        where email_id in (select r.email_id from agent_reads r join emails e using (email_id)
+          where r.status='pending' or (r.status='running' and r.started_at < now() - interval '5 minutes')
+          order by e.received_at limit $1 for update skip locked)
+        returning email_id, attempts`, [concurrency])).rows;
+    await Promise.all(claimed.map(async ({ email_id, attempts }) => {
+      const e = (await db.query('select * from emails where email_id=$1', [email_id])).rows[0];
+      const r = await modelRead(db, { ...e, received_at: iso(e.received_at) }, matcher, { budgetMs: Math.min(120000, deadline - Date.now() - 5000), chatFn });
+      // One retry for a failed read; after that the rules reader takes the email.
+      const status = r.reading ? 'done' : attempts < 2 ? 'pending' : 'failed';
+      await db.query('update agent_reads set status=$2, model=$3, reading=$4::jsonb, trace=$5::jsonb, usage=$6::jsonb, error=$7, finished_at=now() where email_id=$1',
+        [email_id, status, r.model, JSON.stringify(r.reading || null), JSON.stringify(r.trace), JSON.stringify(r.usage), r.error || null]);
+    }));
+    return claimed.length;
+  };
 
-  let processed = 0;
-  if (await lock(db, 'process', 300000)) {
+  // Phase B: checks and lanes for every email that is ready, in arrival order, by one worker at a time.
+  const decide = async () => {
+    if (!(await lock(db, 'process', 300000))) return 0;
+    let n = 0;
     try {
       const todo = (await db.query(`select e.*, r.status as read_status, r.model as read_model, r.reading, r.trace as read_trace, r.usage as read_usage, r.error as read_error
           from emails e left join agent_reads r using (email_id) left join cases c using (email_id)
@@ -77,9 +78,18 @@ export async function runAgentQueue(db, { budgetMs = Number(process.env.AGENT_BU
               [e.email_id, e.ticket_no, 'The agent could not process this email. Read it and handle it by hand.', JSON.stringify([{ code: 'PROCESSING_ERROR', text: String(err2.message || err2).slice(0, 300), severity: 'bad' }])]);
           }
         }
-        processed++;
+        n++;
       }
     } finally { await unlock(db, 'process'); }
+    return n;
+  };
+
+  // Tickets appear wave by wave instead of all at the end.
+  let processed = 0;
+  for (;;) {
+    const read = await readWave();
+    processed += await decide();
+    if (!read) break;
   }
   const s = await queueStatus(db);
   if (processed && !s.pending) await audit(db, 'agent', 'agent', null, 'queue_drained', { total: s.total, read_by_model: s.read_by_model, model_failed: s.model_failed }).catch(() => {});
