@@ -19,8 +19,9 @@ await runPipeline(db);
 let s;
 for (let i = 0; i < 20; i++) { s = await runAgentQueue(db, { budgetMs: 600000 }); console.log(`run ${i + 1}: processed ${s.processed}/${s.total}, model read ${s.read_by_model}, model failed ${s.model_failed}`); if (!s.pending) break; }
 const r = await results(db);
-const cases = Object.fromEntries((await db.query('select email_id, lane, intent, flags, checks, proposal, model from cases')).rows.map((c) => [c.email_id, c]));
+const cases = Object.fromEntries((await db.query('select email_id, lane, intent, flags, checks, proposal, model, priority from cases')).rows.map((c) => [c.email_id, c]));
 const reads = (await db.query('select email_id, status, usage, error from agent_reads')).rows;
+const count = (xs) => xs.reduce((m, x) => ({ ...m, [x]: (m[x] || 0) + 1 }), {});
 const sum = (k) => reads.reduce((a, x) => a + (Number(x.usage?.[k]) || 0), 0);
 const agreeM01 = Object.values(cases).filter((c) => c.checks.some((k) => k.code === 'M01' && k.pass)).length;
 const withM01 = Object.values(cases).filter((c) => c.checks.some((k) => k.code === 'M01')).length;
@@ -33,7 +34,10 @@ const out = {
   model_read_ok: reads.filter((x) => x.status === 'done').length, model_failed: reads.filter((x) => x.status === 'failed').length,
   readers_agree: agreeM01, readers_compared: withM01, next_actions: nextActions,
   model_calls: sum('calls'), prompt_tokens: sum('prompt_tokens'), completion_tokens: sum('completion_tokens'), cost_usd: Math.round(sum('cost_usd') * 10000) / 10000, model_seconds: Math.round(sum('ms') / 1000),
-  per: r.per.map((p) => ({ email_id: p.email_id, lane: p.lane, expected_lane: p.expected_lane, intent: p.intent, expected_intent: p.expected_intent,
+  flag_counts: count(Object.values(cases).flatMap((c) => [...new Set(c.flags.map((f) => f.code))])),
+  check_fail_counts: count(Object.values(cases).flatMap((c) => c.checks.filter((k) => !k.pass).map((k) => k.code))),
+  per: r.per.map((p) => ({ email_id: p.email_id, ticket_no: p.ticket_no, customer_name: p.customer_name, total: cases[p.email_id].proposal.total ?? null, priority: cases[p.email_id].priority,
+    lane: p.lane, expected_lane: p.expected_lane, intent: p.intent, expected_intent: p.expected_intent, usage: reads.find((x) => x.email_id === p.email_id)?.usage || null,
     flags: cases[p.email_id].flags.map((f) => f.code), next_action: cases[p.email_id].proposal.agent?.next_action || null,
     reasoning: cases[p.email_id].proposal.agent?.reasoning || null, error: reads.find((x) => x.email_id === p.email_id)?.error || null,
     failed_checks: cases[p.email_id].checks.filter((k) => !k.pass).map((k) => `${k.code}: ${k.detail}`.slice(0, 160)) })),

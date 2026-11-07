@@ -144,7 +144,15 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
   trace.push({ by: 'code', tool: 'rules_read', input: { email_id: email.email_id }, output: { intent: rules.intent, lines: rules.lines.map((l) => [l.sku || l.description, l.qty]), customer_po: rules.customer_po, language: rules.language } });
   let ext = rules;
   let model = 'rules';
-  if (read?.reading) { ext = readingToExtraction(read.reading, email); model = read.model; }
+  if (read?.reading) {
+    ext = readingToExtraction(read.reading, email);
+    model = read.model;
+    // A same-day add-on with no order reference is a new order linked to the earlier ticket (assumption A12).
+    if (ext.intent === 'order_change' && !ext.references_so && !ext.customer_po) {
+      const adds = ext.lines.length ? ext.lines : ext.change_ops.map((o) => ({ sku: o.sku, qty: o.qty, unit_text: '', description: o.description, quoted_sku: Boolean(o.sku && email.body.toUpperCase().includes(o.sku)) }));
+      if (adds.length) ext = { ...ext, intent: 'new_order', lines: adds, change_ops: [] };
+    }
+  }
   else if (read?.error) flag('MODEL_FALLBACK', `The model could not finish (${read.error.slice(0, 160)}). The rules reader was used instead.`, 'info');
   const noise = ['spam', 'auto_reply'];
   if (noise.includes(ext.intent) !== noise.includes(rules.intent)) ext.intent = 'other'; // both readers must agree before a case is closed unread
@@ -325,8 +333,8 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
     check('X01', 'No instructions aimed at the system', !sec);
     check('I01', 'Request is a new order', ext.intent === 'new_order', ext.intent);
     check('U01', 'Sender identity verified', !flags.some((f) => f.code === 'UNVERIFIED_SENDER'));
-    // The model's own questions count when the code found nothing to ask.
-    if (!p.questions.length && ext.model_questions?.length && ['order', 'quote'].includes(p.kind)) p.questions.push(...ext.model_questions.slice(0, 4));
+    // The model's questions are suggestions for the reviewer; only questions the code raised decide the lane.
+    if (ext.model_questions?.length) p.agent_questions = ext.model_questions.slice(0, 4);
     check('Q01', 'Nothing to ask the customer', p.questions.length === 0, p.questions.join(' | '));
     if (read?.reading) {
       // Two independent readers: an order is written without a person only when both read the same lines.
@@ -349,6 +357,7 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
       else if (p.questions.length && p.kind !== 'route' && !flags.some((f) => f.severity === 'bad')) lane = 'waiting_on_customer';
     }
     if (p.questions.length) p.reply_draft = draftReply(email, p);
+    else if (p.agent_questions?.length && lane === 'needs_review') p.reply_draft = draftReply(email, { ...p, questions: p.agent_questions });
   } else {
     p.kind = 'route';
     p.summary = 'The sender is not a customer. Hand over to sales.';

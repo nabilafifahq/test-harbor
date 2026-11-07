@@ -578,7 +578,7 @@ async function renderTicket(id) {
         </section>` : consequence ? `<section class="card">${consequence}</section>` : ''}
         <section class="card" aria-label="Reply">
           <h2>${icon('send')} ${p.questions?.length ? 'Ask the customer' : 'Reply to the customer'}</h2>
-          ${p.questions?.length ? `<ul class="body-s">${p.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}
+          ${p.questions?.length ? `<ul class="body-s">${p.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : p.agent_questions?.length ? `<p class="body-s muted">The agent suggests asking:</p><ul class="body-s">${p.agent_questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}
           <div class="field"><label for="reply">Message to ${esc(t.email.from_email)}</label><textarea id="reply" rows="7">${esc(p.reply_draft || '')}</textarea></div>
           <div class="actions"><button class="btn btn-tonal" id="send-reply">${icon('send')} Queue reply</button><span class="body-s muted">The demo keeps replies in an outbox; nothing is emailed.</span></div>
         </section>
