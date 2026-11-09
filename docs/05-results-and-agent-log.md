@@ -1,13 +1,13 @@
 # Results and agent log
 
-| Document | HP-O2C-RES-001, version 1.1, 7 November 2026 |
+| Document | HP-O2C-RES-001, version 1.2, 9 November 2026 |
 |---|---|
 
 Run: all 40 emails of 2 November through the model agent (DeepSeek V4 Flash, `deepseek-ai/DeepSeek-V4-Flash-0731`, on DeepInfra), against the 07:00 ERP snapshot, scored against `data/golden_labels.json`, which the architecture agent wrote from the ERP before the build. The eval-model job in GitHub Actions runs it and saves every run on the `eval-results` branch (`runs/<time>-<run id>/`, with the model's raw readings and tool traces). The rules reader alone runs in CI on every push.
 
 ## How the 40 emails were handled
 
-Three report runs, after the last fix; the three runs before them gave the same routing.
+Three report runs, after the last fix; the three runs before them gave the same routing. The production deployment then read the same 40 emails live on 9 November (`/api/status`): 40 of 40 routed as labelled, intent 34 of 40, 0 unsafe, 0 missed, readers agree 30 of 37, 168 model calls, 0.0365 USD.
 
 | Measure | Report runs | Rules reader alone |
 |---|---|---|

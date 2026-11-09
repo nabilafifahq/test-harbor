@@ -314,6 +314,7 @@ Promote the previous production deployment in Vercel (Deployments, then Promote 
 - Every server error is logged with a short reference code that is also shown to the user.
 - `audit_events` records each model reading (model, tools called, tokens, cost, time), each fallback, each ticket, each human decision, each reviewer edit and each refused commit with its reasons.
 - Each ticket keeps the full tool trace (inputs and outputs), shown on the ticket page.
+- `GET /api/status` needs no sign-in and returns counts only: reader mode, queue progress, routing against the labels, model calls and cost.
 - `GET /api/health` returns `{"ok":true}` without touching the database, for uptime checks.
 
 ## 7. Security
