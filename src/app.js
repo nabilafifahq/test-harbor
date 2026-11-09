@@ -287,7 +287,12 @@ export async function handle(req, res) {
     db = await getDb();
     await ensureReady(db);
     // Public, counts only: lets an operator or a monitor see whether the inbox has been read, without signing in.
-    if (p === '/api/status') return send(res, 200, { reader: llmConfigured() ? 'model' : replayFile() ? 'replay' : 'rules', ...(await queueStatus(db)) });
+    if (p === '/api/status') {
+      const r = await results(db);
+      return send(res, 200, { reader: llmConfigured() ? 'model' : replayFile() ? 'replay' : 'rules', ...(await queueStatus(db)),
+        lanes: r.lanes, lane_agreement: r.lane_agreement, intent_agreement: r.intent_agreement, scored: r.scored, unsafe_auto_commits: r.unsafe_auto_commits, missed_auto_commits: r.missed_auto_commits,
+        readers_agree: r.agent.readers_agree, readers_compared: r.agent.readers_compared, model_calls: r.agent.calls, cost_usd: r.agent.cost_usd });
+    }
     const secure = isSecure(req);
     const cname = cookieName(secure);
     const token = readCookie(req, cname);
