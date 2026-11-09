@@ -286,6 +286,8 @@ export async function handle(req, res) {
     if (req.method !== 'GET' && !sameOrigin(req)) throw httpErr(403, 'Cross-site request refused.');
     db = await getDb();
     await ensureReady(db);
+    // Public, counts only: lets an operator or a monitor see whether the inbox has been read, without signing in.
+    if (p === '/api/status') return send(res, 200, { reader: llmConfigured() ? 'model' : replayFile() ? 'replay' : 'rules', ...(await queueStatus(db)) });
     const secure = isSecure(req);
     const cname = cookieName(secure);
     const token = readCookie(req, cname);
