@@ -40,7 +40,7 @@ Columns filled by a column default (`id`, `at`, `created_at`, `last_seen_at` and
 
 "Any signed-in user" means the server checks a valid session and nothing else. Role checks come from `CAN` in `src/auth.js`.
 
-Rows with actor `anonymous` (failed sign-ins, and 403s for a request without a session) cost the caller nothing, so at most 20 are written per minute; further ones in the same minute are not written.
+A wrong password on a real account is always recorded; the lockout bounds it to a few a minute. Other rows with actor `anonymous` (unknown usernames, sign-in attempts on a locked account, 403s for a request without a session) cost the caller nothing, so each action keeps at most 20 a minute, counted per username where there is one. The 21st writes one `audit_throttled` row; further ones in that minute are not written. A flood of one kind therefore cannot hide another.
 
 ### 2.1 Sign-in and session
 
@@ -151,6 +151,7 @@ The seed runs on the first request after a deploy, when the reader mode changes 
 | `signed_in` | username | `human` | none | empty |
 | `sign_in_failed` | `anonymous` | `human` | none | `reason` (`wrong_password`, `locked`, `unknown_user`); `username` except for `unknown_user`; `failed_count` for `wrong_password` |
 | `account_locked` | `system` | `system` | none | `username`, `failed_count` |
+| `audit_throttled` | `anonymous` | `human` | none | `action`, `username` when the cut rows had one, `per_minute` |
 | `signed_out` | username | `human` | none | empty |
 | `access_denied` | username or `anonymous` | `human` | ticket in the path, if any | `method`, `path`, `error` |
 | `email_received` | username, or `inbound` | `human`, or `system` for the webhook | the new email | `email_id`, `ticket_no`, `from`, `source` (`form` or `eml`) |
@@ -181,7 +182,7 @@ Fixed since version 1.0 of this document: a reset erased the audit trail and did
 - After an approval, `cases.assignee` is set by a second statement outside the commit transaction, without `row_version` or `updated_at`. The commit set `updated_at` a moment earlier.
 - Auto-commit refused at commit time updates `cases` without `updated_at`. The ticket insert set it a moment earlier.
 - The copy to `audit_archive` and the drop of `audit_events` are separate statements. If the process stops between them, the retry copies the same rows again: duplicates in the archive, nothing lost.
-- Above 20 rows a minute with actor `anonymous`, further failed sign-ins and refused requests without a session are not recorded. The console's audit page shows the latest 1000 rows, so a long flood pushes older events off that page; they stay in the table and on each ticket's own timeline.
+- Above 20 a minute of one anonymous action (per username where there is one), further rows are not recorded; one `audit_throttled` row marks the cut. Wrong passwords on real accounts are never cut. The console's audit page shows the latest 1000 rows, so a long flood pushes older events off that page; they stay in the table and on each ticket's own timeline.
 - `audit_archive` has no screen in the console. Read it with SQL, for example `select * from audit_archive order by archived_at desc, id desc`.
 
 ## 9. Run it again

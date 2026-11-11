@@ -104,10 +104,14 @@ test('a mail that reuses a known Message-ID with other text is a new email, not 
   assert.equal((await events('email_duplicate')).length, 1, 'only the identical upload in the test above');
 });
 
-test('requests without a session add at most 20 audit rows a minute', async () => {
+test('a flood of unknown usernames is cut at 20 a minute, says so, and does not hide wrong passwords on a real account', async () => {
   for (let i = 0; i < 25; i++) await call('/api/login', { body: { username: `nobody-${i}`, password: 'x' } });
-  const n = (await db.query("select count(*)::int as n from audit_events where actor = 'anonymous' and at > now() - interval '1 minute'")).rows[0].n;
-  assert.equal(n, 20);
+  const recent = async (where) => (await db.query(`select count(*)::int as n from audit_events where at > now() - interval '1 minute' and ${where}`)).rows[0].n;
+  assert.equal(await recent("action = 'sign_in_failed' and detail->>'reason' = 'unknown_user'"), 20);
+  assert.equal(await recent("action = 'audit_throttled' and detail->>'action' = 'sign_in_failed'"), 1);
+
+  assert.equal((await call('/api/login', { body: { username: 'admin', password: 'a guess' } })).status, 401);
+  assert.equal(await recent("action = 'sign_in_failed' and detail->>'username' = 'admin' and detail->>'reason' = 'wrong_password'"), 1);
 });
 
 // Last: a reset signs everyone out and reloads every ticket.

@@ -82,11 +82,14 @@ export function inBackground(db) {
   return job;
 }
 
-// Rows with actor anonymous (failed sign-ins, refused requests without a session) cost an attacker nothing to cause.
-// At most 20 a minute are kept: enough to show an attack, too few to flood the trail.
+// Rows with actor anonymous that nothing else bounds (unknown usernames, a locked account, 403s without a session) cost
+// an attacker nothing to cause. Each action keeps 20 a minute, counted per username where there is one, so a flood of
+// one kind cannot crowd out another. The 21st writes one audit_throttled row, so the cut itself is on record.
 async function auditAnonymous(db, emailId, action, detail) {
-  const n = (await db.query("select count(*)::int as n from audit_events where actor = 'anonymous' and at > now() - interval '1 minute'")).rows[0].n;
+  const username = detail.username || '';
+  const n = (await db.query("select count(*)::int as n from audit_events where actor = 'anonymous' and $1 in (action, detail->>'action') and coalesce(detail->>'username', '') = $2 and at > now() - interval '1 minute'", [action, username])).rows[0].n;
   if (n < 20) await audit(db, 'anonymous', 'human', emailId, action, detail);
+  else if (n === 20) await audit(db, 'anonymous', 'human', null, 'audit_throttled', { action, ...(username ? { username } : {}), per_minute: 20 });
 }
 
 const bearerOk = (req) => Boolean(process.env.CRON_SECRET) && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
@@ -334,7 +337,10 @@ export async function handle(req, res) {
       const r = await login(db, str(b.username, 64), str(b.password, 256));
       if (r.error) {
         // The caller is not signed in, so the actor is anonymous. A username nobody has is not stored: people type passwords into that box.
-        await auditAnonymous(db, null, 'sign_in_failed', { reason: r.reason, ...(r.username ? { username: r.username } : {}), ...(r.failed ? { failed_count: r.failed } : {}) });
+        const failed = { reason: r.reason, ...(r.username ? { username: r.username } : {}), ...(r.failed ? { failed_count: r.failed } : {}) };
+        // A wrong password on a real account is always written: the lockout already bounds it to a few a minute.
+        if (r.reason === 'wrong_password') await audit(db, 'anonymous', 'human', null, 'sign_in_failed', failed);
+        else await auditAnonymous(db, null, 'sign_in_failed', failed);
         if (r.locked) await audit(db, 'system', 'system', null, 'account_locked', { username: r.username, failed_count: r.failed });
         return send(res, r.status, { error: r.error });
       }
