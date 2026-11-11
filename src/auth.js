@@ -24,11 +24,14 @@ export function readCookie(req, name) {
 
 export async function login(q, username, password) {
   const u = (await q.query('select * from users where username=$1', [String(username || '').toLowerCase()])).rows[0];
+  // The attempt is counted before the password is checked, in one statement that skips a locked account, so attempts
+  // sent at the same moment cannot all get past the lock. A correct password resets the count below.
+  const claim = u && (await q.query(`update users set failed_count=failed_count+1, locked_until=case when failed_count+1>=$2 then now()+interval '${LOCK_MINUTES} minutes' else locked_until end where username=$1 and (locked_until is null or locked_until <= now()) returning failed_count`, [u.username, LOCK_AFTER])).rows[0];
   // Same work whether or not the account exists, so response time does not reveal valid usernames.
   const ok = u ? await verify(u.password_hash, String(password || '')).catch(() => false) : (await hashPassword('timing-equaliser'), false);
-  if (u && u.locked_until && new Date(u.locked_until) > new Date()) return { error: 'Too many attempts. Wait a few minutes and try again.', status: 429, username: u.username, reason: 'locked' };
+  if (u && !claim) return { error: 'Too many attempts. Wait a few minutes and try again.', status: 429, username: u.username, reason: 'locked' };
   if (!ok) {
-    const failed = u ? (await q.query(`update users set failed_count=failed_count+1, locked_until=case when failed_count+1>=$2 then now()+interval '${LOCK_MINUTES} minutes' else locked_until end where username=$1 returning failed_count`, [u.username, LOCK_AFTER])).rows[0].failed_count : 0;
+    const failed = claim ? claim.failed_count : 0;
     return { error: 'That username and password do not match.', status: 401, username: u?.username, reason: u ? 'wrong_password' : 'unknown_user', failed, locked: failed >= LOCK_AFTER };
   }
   await q.query('update users set failed_count=0, locked_until=null where username=$1', [u.username]);

@@ -69,6 +69,14 @@ test('a mail provider that delivers the same mail twice at once gets one ticket 
   assert.deepEqual((await db.query("select actor, email_id from audit_events where action='email_duplicate'")).rows, [{ actor: 'inbound', email_id: a.body.email_id }]);
 });
 
+test('twenty wrong passwords at the same moment get five guesses, not twenty', async () => {
+  const res = await Promise.all(Array.from({ length: 20 }, () => call('/api/login', { body: { username: 'credit', password: 'a guess' } })));
+  const by = (s) => res.filter((r) => r.status === s).length;
+  assert.deepEqual([by(401), by(429)], [5, 15], 'only five attempts are checked before the lock');
+  const rows = (await db.query("select count(*)::int as n from audit_events where action = 'sign_in_failed' and detail->>'username' = 'credit' and detail->>'reason' = 'wrong_password'")).rows[0].n;
+  assert.equal(rows, 5);
+});
+
 test('two approvals at the same moment get different SO numbers', { skip: needsPostgres }, async () => {
   const [a, b] = await openOrders(2);
   const [x, y] = await twoSkus();

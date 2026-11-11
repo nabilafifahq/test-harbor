@@ -47,7 +47,7 @@ A wrong password on a real account is always recorded; the lockout bounds it to 
 | Action | Endpoint | Writes | Audit row |
 |---|---|---|---|
 | Sign in | `POST /api/login` | `users.failed_count = 0`, `users.locked_until = null`. `sessions` insert: `token_hash` (SHA-256 of the cookie token), `username`, `created_at` and `last_seen_at` default | `signed_in`, actor the username |
-| Sign in, wrong password | `POST /api/login` | `users.failed_count + 1`. From the fifth failure on, `users.locked_until = now() + 5 minutes`; the count goes back to 0 only on a successful sign-in, so each failure after a lock expires locks again | `sign_in_failed`, actor `anonymous`, detail `username`, `reason: wrong_password`, `failed_count`. Each time the lock is set, also `account_locked`, actor `system` |
+| Sign in, wrong password | `POST /api/login` | `users.failed_count + 1`, written before the password is checked by one statement that skips a locked account, so attempts sent at the same moment cannot get past the lock. From the fifth attempt on, `users.locked_until = now() + 5 minutes`; the count goes back to 0 only on a successful sign-in, so each failure after a lock expires locks again | `sign_in_failed`, actor `anonymous`, detail `username`, `reason: wrong_password`, `failed_count`. Each time the lock is set, also `account_locked`, actor `system` |
 | Sign in, locked account | `POST /api/login` | None | `sign_in_failed`, `reason: locked` |
 | Sign in, unknown username | `POST /api/login` | None | `sign_in_failed`, `reason: unknown_user`. The typed username is not stored |
 | Any signed-in request, page views included | Any | `sessions.last_seen_at = now()`. A session past 1 hour idle or 24 hours old is deleted instead | None |
@@ -171,7 +171,7 @@ The seed runs on the first request after a deploy, when the reader mode changes 
 
 ## 8. Not recorded, and known gaps
 
-Fixed since version 1.0 of this document: a reset erased the audit trail and did not say who reset; sign-out, wrong passwords, lockouts and 403s wrote no audit row; reject and assign did not move `cases.updated_at`; setting the status a ticket already had wrote a `status_changed` row; two emails or two approvals at the same moment could fail with a duplicate key, and two approvals sharing SKUs could deadlock; the same mail delivered twice made two tickets.
+Fixed since version 1.0 of this document: a reset erased the audit trail and did not say who reset; sign-out, wrong passwords, lockouts and 403s wrote no audit row; reject and assign did not move `cases.updated_at`; wrong passwords sent at the same moment were all checked before the lock took hold; setting the status a ticket already had wrote a `status_changed` row; two emails or two approvals at the same moment could fail with a duplicate key, and two approvals sharing SKUs could deadlock; the same mail delivered twice made two tickets.
 
 - Reject and the Status menu have no role check. Any signed-in user can close a ticket that waits for Credit and AR or for Admin, including a security-flagged one. The `rejected` or `status_changed` row records who did it.
 - Reject accepts `row_version` from the console but does not compare it, so two people rejecting at once both succeed.
