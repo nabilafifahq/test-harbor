@@ -36,8 +36,13 @@ jobs:
           DEMO_PASSWORD: ci-password-for-boot-test
           PORT: 3100
         run: |
-          node src/server.js & sleep 25
-          curl -fsS http://localhost:3100/api/health
-          curl -fsS -c jar -H 'content-type: application/json' -d '{"username":"ops","password":"ci-password-for-boot-test"}' http://localhost:3100/api/login
-          curl -fsS -b jar "http://localhost:3100/api/tickets?view=all&size=100" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);if(r.total!==40)process.exit(1);console.log('tickets',r.total)})"
+          node src/server.js & sleep 5
+          curl -fsS http://localhost:3100/api/health; echo
+          # The first request seeds the database; the 40 tickets are then decided in the background. Wait for the queue to drain.
+          for i in $(seq 1 45); do
+            curl -fsS http://localhost:3100/api/status | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);console.log('processed',r.processed,'pending',r.pending);process.exit(r.total===40&&r.pending===0?0:1)})" && break
+            sleep 2
+          done
+          curl -fsS -c jar -H 'content-type: application/json' -d '{"username":"ops","password":"ci-password-for-boot-test"}' http://localhost:3100/api/login; echo
+          curl -fsS -b jar "http://localhost:3100/api/tickets?view=all&size=100" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);console.log('tickets',r.total);if(r.total!==40)process.exit(1)})"
           curl -fsS -b jar http://localhost:3100/api/results | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);console.log('lane agreement',r.lane_agreement,'unsafe',r.unsafe_auto_commits);if(r.unsafe_auto_commits!==0)process.exit(1)})"
