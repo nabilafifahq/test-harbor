@@ -3,7 +3,7 @@
 | Document control | |
 |---|---|
 | Document ID | HP-O2C-ARC-001 |
-| Version | 1.1, 11 November 2026 |
+| Version | 1.2, 11 November 2026 |
 | Owner | Nabila |
 | Status | Draft for review |
 | Related | README section 4 (summary architecture), `docs/07-database-writes.md` (writes per action) |
@@ -81,7 +81,7 @@ Two properties carry most of the design:
 | ERP master | `customers`, `customer_contacts`, `ship_to_addresses`, `products`, `customer_prices`, `incoming_supply` | Loaded at seed; never written by the agent or a reviewer |
 | ERP transactional | `sales_orders`, `sales_order_lines`, `inventory` | One order per delivery site per approved request |
 | Work | `emails`, `agent_reads`, `cases`, `comments`, `outbox` | One `emails`, `agent_reads` and `cases` row per email |
-| Control | `audit_events`, `users`, `sessions`, `app_meta` | Two to four audit rows per email from the agent, one per human action |
+| Control | `audit_events`, `audit_archive`, `users`, `sessions`, `app_meta`; sequences `email_seq` and `so_number_seq` | Two to four audit rows per email from the agent, one per human action; `audit_archive` takes the whole trail at each demo reset |
 
 Measured on the 40 emails with the recorded DeepSeek run: about 15 KB of stored content per email (text and JSON before Postgres compression), and three quarters of it is the model's tool trace, kept twice (`agent_reads.trace` and `cases.trace`). Every table, column and action is listed in `docs/07-database-writes.md`.
 
@@ -206,7 +206,7 @@ Found by reading the code against higher volume. None affects correctness at tod
 | 5 | Model waves (`runAgentQueue`) | Claims 8, waits for all 8, claims the next 8 | A wave waits for its slowest email (55 s against a 14 s average) | Continuous worker pool: claim the next email as soon as one finishes. *Derived:* close to twice the throughput at the same concurrency |
 | 6 | Decision lock | One worker for all customers | Becomes the limit only at very high volume (decision step is milliseconds) | Lock per customer: credit and duplicate POs depend only on the same customer; stock is already protected by row locks in the commit |
 | 7 | Product matcher (`buildMatcher`) | BM25 index over the whole catalog built in memory per run | Build time and memory grow with a catalog of tens of thousands of SKUs | Cache per instance and rebuild on catalog change, or move matching to Postgres full-text search |
-| 8 | Traces and audit | Full tool trace stored twice per email; audit grows forever | Storage and backup size | Keep the trace once; partition `audit_events` and `agent_reads` by month; move traces older than the retention period to object storage |
+| 8 | Traces and audit | Full tool trace stored twice per email; `audit_events` and `audit_archive` grow forever (anonymous rows are capped at 20 a minute per action) | Storage and backup size | Keep the trace once; partition `audit_events` and `agent_reads` by month; move traces older than the retention period to object storage |
 | 9 | Demo settings | `MAX_EMAILS` 300, fixed clock `DEMO_NOW` and `BUSINESS_DATE`, received time set from the demo clock | Not valid outside the demo | Remove for production; use the mail's real receive time |
 | 10 | Triggers on Hobby | Cron once a day | A stalled run waits until the console is opened or the next day | Pro cron every minute, or the worker process in section 3.3 |
 
@@ -220,6 +220,28 @@ Each stage starts when its signal appears.
 | 1, first real team | One company's order desk; paying use | Vercel Pro (Hobby forbids commercial use), Neon Launch, cron every minute | Rows 9 and 10 of section 3.4; direct mailbox connection; single sign-on |
 | 2, more volume | Backlog at peak hours, list pages slowing | Worker process on a container platform or VPS next to the web tier; read replica for dashboards | Rows 4, 5, 7 and 8; queue depth and age alerts; dead-letter view |
 | 3, several companies | More than one customer of the product | Tenant ID on every row with Postgres row-level security, or one Neon project per tenant | Per-tenant queues and model budgets; row 6 |
+
+### 3.6 Defects fixed on 11 November 2026
+
+Found by reading the code, by `scripts/db-writes.mjs`, and by automated security review of each commit. Every fix has a test that failed before it: `test/concurrency.test.mjs` (also run against Postgres 17 in CI) or `test/audit.test.mjs`. The rows and audit actions each fix writes are in `docs/07-database-writes.md`, section 8.
+
+| Area | Defect | Fix |
+|---|---|---|
+| Concurrency | Email number from `count(*) + 1`: emails arriving together failed with a duplicate key | Sequence `email_seq` |
+| Concurrency | SO number from the highest + 1: approvals at the same moment failed with a duplicate key | Sequence `so_number_seq`; a credit refusal after the number was taken leaves a gap |
+| Concurrency | Stock rows locked in draft order: two approvals sharing SKUs in opposite order deadlocked, and Postgres aborted one after a second | One `select ... order by sku for update` locks every stock row of the commit first |
+| Concurrency | Reject read the ticket, then wrote it: two rejects at once both won, and a reject could close a ticket an approval had just written | One `update ... where row_version = $sent and erp_status <> 'committed'`; the loser gets 409 |
+| Security | Lockout read `locked_until`, ran Argon2, then counted the failure: wrong passwords sent together were all checked (18 of 20 in the test) | The attempt is counted first, in one `update` that skips a locked account; 20 at once get 5 guesses |
+| Security | Reject and closing had no server-side role check; only the console hid the button | `CAN.approve` on the server for Reject and for Resolved or Closed |
+| Security | Deduplication on `Message-ID` alone let a sender hide another mail by copying its ID | Unique on `Message-ID`, sender and `md5(body)` |
+| Security | Failed sign-ins and 403s without a session wrote unbounded audit rows, and one shared cap let a flood of unknown usernames hide wrong passwords on a real account | 20 a minute per action and username with an `audit_throttled` marker; wrong passwords on real accounts are never cut; stored path cut to 200 characters |
+| Ingest | A webhook retry of the same mail made a second ticket | Unique index above; the webhook gets the existing ticket back, the console a 409 |
+| Audit | A demo reset dropped the trail and did not say who reset | `audit_archive`, filled in one transaction with the drop; `demo_reset` names the Admin |
+| Audit | No row for sign-outs, lockouts, 403s, approvals refused before the re-checks, emails parked with `PROCESSING_ERROR`, or expired sessions | `signed_out`, `account_locked`, `access_denied`, `commit_refused`, `processing_failed`, `session_expired` |
+| Audit | The audit page read the newest 1000 rows and searched them in memory; the archive had no screen | Search and paging in SQL over every row; "Before resets" view |
+| Data | The approver became assignee in a second statement outside the commit; an auto-commit refusal and reject and assign did not move `updated_at`; setting the current status wrote a row | Assignee inside the commit statement; `updated_at` on every ticket write; the same status writes nothing |
+
+Deploying these changed the schema, so the seed version moved from v3 to v4 and the first request after the deploy reseeded Neon once: the live model read the 40 emails again (40 of 40 routed as labelled, no unsafe commit, USD 0.0342), and the earlier trail moved to `audit_archive`.
 
 ## 4. Scaling the agent
 
@@ -275,6 +297,10 @@ The ten read-only tools in `src/model-agent.js` (customer, ship-to, catalog sear
 **What about much more data?** About 15 KB per email today, mostly traces. Keep the trace once, partition audit and reads by month, archive old traces to object storage, and serve dashboards from a read replica.
 
 **Two reviewers approve the same ticket at once?** The commit locks the ticket row, so the two run one after the other. The second finds the ticket already written and gets the first result back. If the ticket changed in another way after it was opened, such as an edit or a reassignment, the version the console sent no longer matches and the reviewer is asked to reload. The order is written once.
+
+**Can someone guess a password by sending many attempts at once?** No. Each attempt is counted before the password is checked, in one statement that skips a locked account, so twenty attempts sent together get five guesses and fifteen refusals (section 3.6, tested).
+
+**Can Operations close a ticket that waits for Credit and AR?** No. Rejecting or closing decides a ticket, so the server applies the same role check as approving. The console also greys the option out, but the server check is what stops it.
 
 **Can other agents connect to it?** Yes, through the read-only tools served as an MCP server; any write still goes through approval with server-side role checks (section 4.4).
 

@@ -92,6 +92,11 @@ async function auditAnonymous(db, emailId, action, detail) {
   else if (n === 20) await audit(db, 'anonymous', 'human', null, 'audit_throttled', { action, ...(username ? { username } : {}), per_minute: 20 });
 }
 
+// Rejecting or closing a ticket decides it just as approving does, so it needs the same role (CAN.approve).
+const decideDenied = (t, verb) => httpErr(403, t.flags.some((f) => f.code === 'SECURITY_INJECTION')
+  ? `This ticket has a security flag. Only an Admin can ${verb} it.`
+  : `This ticket needs Credit and AR to ${verb} it. Assign it to them or add a note.`);
+
 const bearerOk = (req) => Boolean(process.env.CRON_SECRET) && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
 
 // New mail from the console form, or from a mail provider's inbound webhook. Raw .eml or plain fields.
@@ -265,7 +270,7 @@ async function ticketDetail(db, id, user) {
   ]);
   return {
     ...c, email: e, audit: a.rows, comments: m.rows, outbox: o.rows, users: users.rows, ship_tos: shipTos.rows,
-    can: { approve: CAN.approve(user, c) && c.erp_status !== 'committed' && ['order', 'change', 'cancel'].includes(c.proposal.kind) && !['resolved', 'closed'].includes(c.status), reset: CAN.reset(user) },
+    can: { approve: CAN.approve(user, c) && c.erp_status !== 'committed' && ['order', 'change', 'cancel'].includes(c.proposal.kind) && !['resolved', 'closed'].includes(c.status), close: CAN.approve(user, c) || c.erp_status === 'committed', reset: CAN.reset(user) },
   };
 }
 
@@ -368,12 +373,22 @@ export async function handle(req, res) {
     if (p === '/api/results') return send(res, 200, await results(db));
     if (p === '/api/catalog') return send(res, 200, (await db.query("select p.sku, p.name, p.sell_uom, p.pack, p.list_price, p.status, i.available from products p join inventory i using (sku) order by sku")).rows);
     if (p === '/api/audit') {
+      // Search and paging run in SQL over every row, so a burst of new events cannot push older ones out of reach.
+      // archive=1 reads audit_archive, the trail from before each demo reset.
+      const archive = url.searchParams.get('archive') === '1';
       const { text } = parseQuery(url.searchParams.get('q') || '');
-      let rows = (await db.query('select a.*, c.ticket_no from audit_events a left join cases c using (email_id) order by a.id desc limit 1000')).rows;
-      if (text) { const ix = new InvertedIndex(); rows.forEach((r, i) => ix.add(i, `${r.actor} ${r.actor_type} ${r.action} ${r.ticket_no || ''} ${r.email_id || ''} ${JSON.stringify(r.detail)}`)); const hits = ix.search(text); rows = rows.filter((_, i) => hits.has(i)); }
+      const params = [], where = [];
+      const add = (value, sql) => { params.push(value); where.push(sql(`$${params.length}`)); };
       const actorType = url.searchParams.get('actor_type');
-      if (actorType) rows = rows.filter((r) => r.actor_type === actorType);
-      return send(res, 200, rows.slice(0, 300));
+      if (actorType) add(actorType, (x) => `a.actor_type = ${x}`);
+      for (const word of text.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8)) {
+        add(`%${word.replace(/[\\%_]/g, '\\$&')}%`, (x) => `lower(concat_ws(' ', a.actor, a.actor_type, a.action, ${archive ? '' : 'c.ticket_no, '}a.email_id, a.detail::text)) like ${x}`);
+      }
+      params.push(Math.max(0, Math.floor(Number(url.searchParams.get('offset'))) || 0));
+      const from = archive ? 'audit_archive a' : 'audit_events a left join cases c using (email_id)';
+      const rows = (await db.query(`select a.*${archive ? '' : ', c.ticket_no'} from ${from} ${where.length ? `where ${where.join(' and ')}` : ''}
+        order by ${archive ? 'a.archived_at desc, a.id desc' : 'a.id desc'} limit 300 offset $${params.length}`, params)).rows;
+      return send(res, 200, rows);
     }
     if (p === '/api/admin/reset' && req.method === 'POST') {
       if (!CAN.reset(user)) throw httpErr(403, 'Only an Admin can reset the demo.');
@@ -401,7 +416,6 @@ export async function handle(req, res) {
         if (!CAN.approve(user, t)) throw httpErr(403, t.flags.some((f) => f.code === 'SECURITY_INJECTION') ? 'This ticket has a security flag. Only an Admin can approve it.' : 'Credit and price exceptions need the Credit and AR role.');
         try {
           const r = await commitProposal(db, id, { actor: user.username, actorType: 'human', role: user.role, orders: Array.isArray(b.orders) ? b.orders : undefined, reason: str(b.reason, 500), creditOverride: Boolean(b.credit_override), expectedVersion: b.row_version });
-          await db.query('update cases set assignee=coalesce(assignee,$2) where email_id=$1', [id, user.username]);
           if (Array.isArray(b.orders) && !r.already) {
             const flat = (os) => (os || []).flatMap((o) => (o.lines || []).filter((l) => Number(l.qty) > 0).map((l) => `${o.ship_to_id} ${String(l.sku).toUpperCase()} x ${Number(l.qty)}`)).sort();
             const before = flat(t.proposal.orders), after = flat(b.orders);
@@ -409,15 +423,20 @@ export async function handle(req, res) {
           }
           return send(res, 200, r);
         } catch (e) {
-          if (e.audit) await audit(db, user.username, 'human', id, 'commit_refused', { errors: e.audit.errors });
+          // Every refused approval is on record: the re-checks with their reasons, and the refusals before them (stale version, nothing to write).
+          if (e.status === 409 || e.status === 422) await audit(db, user.username, 'human', id, 'commit_refused', { errors: e.audit ? e.audit.errors : [e.message] });
           throw e;
         }
       }
       if (action === 'reject') {
+        if (!CAN.approve(user, t)) throw decideDenied(t, 'reject');
         const reason = str(b.reason, 500);
         if (!reason) throw httpErr(422, 'Add a short reason so the next person knows why.');
         if (t.erp_status === 'committed') throw httpErr(409, 'This is already in the ERP. Open a cancellation instead.');
-        await db.query("update cases set status='closed', assignee=coalesce(assignee,$2), row_version=row_version+1, updated_at=now() where email_id=$1", [id, user.username]);
+        // One statement checks the version and the ERP state, so two rejects, or a reject racing an approval, cannot both win.
+        const v = Number(b.row_version);
+        const done = await db.query("update cases set status='closed', assignee=coalesce(assignee,$2), row_version=row_version+1, updated_at=now() where email_id=$1 and erp_status <> 'committed' and ($3::int is null or row_version=$3) returning 1", [id, user.username, Number.isInteger(v) && v > 0 ? v : null]);
+        if (!done.rows.length) throw httpErr(409, 'Someone changed this ticket after you opened it. Reload to see the current version.');
         await audit(db, user.username, 'human', id, 'rejected', { reason });
         return send(res, 200, { ok: true });
       }
@@ -432,6 +451,7 @@ export async function handle(req, res) {
         const s = str(b.status, 20);
         if (!['open', 'pending_customer', 'resolved', 'closed'].includes(s)) throw httpErr(422, 'Unknown status.');
         if (s === t.status) return send(res, 200, { ok: true, unchanged: true }); // nothing changes, so nothing is written
+        if (['resolved', 'closed'].includes(s) && t.erp_status !== 'committed' && !CAN.approve(user, t)) throw decideDenied(t, 'close');
         await touch(s);
         await audit(db, user.username, 'human', id, 'status_changed', { from: t.status, to: s, note: str(b.reason, 500) || null });
         return send(res, 200, { ok: true });

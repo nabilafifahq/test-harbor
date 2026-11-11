@@ -3,7 +3,7 @@
 | Document control | |
 |---|---|
 | Document ID | HP-O2C-DBW-001 |
-| Version | 1.1, 11 November 2026 |
+| Version | 1.2, 11 November 2026 |
 | Owner | Nabila |
 | Status | Draft for review |
 | Scope | Every statement in `src/` that writes to Postgres, grouped by the user or agent action that causes it |
@@ -38,7 +38,7 @@ Columns filled by a column default (`id`, `at`, `created_at`, `last_seen_at` and
 
 ## 2. User actions
 
-"Any signed-in user" means the server checks a valid session and nothing else. Role checks come from `CAN` in `src/auth.js`.
+"Any signed-in user" means the server checks a valid session and nothing else. Role checks come from `CAN` in `src/auth.js` and run on the server; the console hides a control a role cannot use, but that is not the check.
 
 A wrong password on a real account is always recorded; the lockout bounds it to a few a minute. Other rows with actor `anonymous` (unknown usernames, sign-in attempts on a locked account, 403s for a request without a session) cost the caller nothing, so each action keeps at most 20 a minute, counted per username where there is one. The 21st writes one `audit_throttled` row; further ones in that minute are not written. A flood of one kind therefore cannot hide another.
 
@@ -50,7 +50,7 @@ A wrong password on a real account is always recorded; the lockout bounds it to 
 | Sign in, wrong password | `POST /api/login` | `users.failed_count + 1`, written before the password is checked by one statement that skips a locked account, so attempts sent at the same moment cannot get past the lock. From the fifth attempt on, `users.locked_until = now() + 5 minutes`; the count goes back to 0 only on a successful sign-in, so each failure after a lock expires locks again | `sign_in_failed`, actor `anonymous`, detail `username`, `reason: wrong_password`, `failed_count`. Each time the lock is set, also `account_locked`, actor `system` |
 | Sign in, locked account | `POST /api/login` | None | `sign_in_failed`, `reason: locked` |
 | Sign in, unknown username | `POST /api/login` | None | `sign_in_failed`, `reason: unknown_user`. The typed username is not stored |
-| Any signed-in request, page views included | Any | `sessions.last_seen_at = now()`. A session past 1 hour idle or 24 hours old is deleted instead | None |
+| Any signed-in request, page views included | Any | `sessions.last_seen_at = now()`. A session past 1 hour idle or 24 hours old is deleted instead, and the request gets 401 | None. When the session is deleted, `session_expired`, actor `system`, detail `username`, `reason` (`idle` or `absolute`), written once by the request whose delete removed the row |
 | Sign out | `POST /api/logout` | `sessions` delete of this token | `signed_out`, actor the username |
 
 ### 2.2 Mail in
@@ -66,12 +66,12 @@ A wrong password on a real account is always recorded; the lockout bounds it to 
 | Console control | Endpoint | Who | Writes | Audit row |
 |---|---|---|---|---|
 | Assign to me, Assign to another user, Unassign, bulk Assign | `POST /api/tickets/:id/assign` | Any signed-in user | `cases.assignee`, `cases.status` (`new` to `open`), `row_version + 1`, `updated_at` | `assigned` or `unassigned`, detail `to` |
-| Status menu | `POST /api/tickets/:id/status` | Any signed-in user | `cases.status`, `assignee` when empty, `row_version + 1`, `updated_at`. The status the ticket already has writes nothing | `status_changed`, detail `from`, `to`, `note`. None when nothing changed |
+| Status menu | `POST /api/tickets/:id/status` | Any signed-in user for Open and Waiting on customer. Resolved and Closed decide the ticket, so they need `CAN.approve` unless the ticket is already in the ERP; otherwise 403 | `cases.status`, `assignee` when empty, `row_version + 1`, `updated_at`. The status the ticket already has writes nothing | `status_changed`, detail `from`, `to`, `note`. None when nothing changed. A refusal writes `access_denied` |
 | Add note | `POST /api/tickets/:id/comment` | Any signed-in user | `comments` insert: `email_id`, `author`, `body`; `kind` and `at` default. A `new` ticket also gets the status write above (`open`) | `note_added`, detail `length` |
 | Queue reply | `POST /api/tickets/:id/reply` | Any signed-in user | `outbox` insert: `email_id`, `to_email`, `subject`, `body`, `sent_by`; `at` default. `cases.status` to `pending_customer` (`resolved` when already in the ERP), `assignee` when empty, `row_version + 1`, `updated_at` | `reply_queued`, detail `to`, `next_status` |
 | Check prices, stock and credit | `POST /api/tickets/:id/preview` | Any signed-in user | None | None |
-| Approve and write to ERP, Apply change in ERP, Cancel the order in ERP | `POST /api/tickets/:id/approve` | `CAN.approve`: Credit and AR or Admin for `CREDIT_BLOCK` and `PRICE_DISPUTE`, Admin only for `SECURITY_INJECTION`, anyone otherwise | `commitProposal` (section 4). Then `cases.assignee` when empty | `approved_and_committed` inside the commit transaction. `reviewer_edited` (detail `removed`, `added`) when the reviewer changed lines or addresses. `commit_refused` (detail `errors`) when the re-checks in section 4 refuse it |
-| Reject | `POST /api/tickets/:id/reject` | Any signed-in user | `cases.status = 'closed'`, `assignee` when empty, `row_version + 1`, `updated_at` | `rejected`, detail `reason` |
+| Approve and write to ERP, Apply change in ERP, Cancel the order in ERP | `POST /api/tickets/:id/approve` | `CAN.approve`: Credit and AR or Admin for `CREDIT_BLOCK` and `PRICE_DISPUTE`, Admin only for `SECURITY_INJECTION`, anyone otherwise | `commitProposal` (section 4), which also sets `cases.assignee` to the approver when empty, in the same statement as the commit | `approved_and_committed` inside the commit transaction. `reviewer_edited` (detail `removed`, `added`) when the reviewer changed lines or addresses. `commit_refused` (detail `errors`) for every refusal with 409 or 422: the re-checks in section 4 and the ones before them (stale version, nothing to write) |
+| Reject | `POST /api/tickets/:id/reject` | `CAN.approve`, the same role that may approve the ticket | One statement: `cases.status = 'closed'`, `assignee` when empty, `row_version + 1`, `updated_at`, only while the ticket is not in the ERP and its `row_version` is the one the console sent. Otherwise 409 and nothing is written, so two rejects at once, or a reject racing an approval, cannot both win | `rejected`, detail `reason` |
 | Reset demo to 07:00 | `POST /api/admin/reset` | Admin | `app_meta` delete of the `seed:%` rows, then the seed in section 6 | `demo_reset`, actor the Admin's username, written after the seed |
 | Any request refused with 403 | Any | | None besides the audit row | `access_denied`, actor the username or `anonymous`, `email_id` when the path names a ticket, detail `method`, `path` (first 200 characters), `error` |
 
@@ -89,8 +89,8 @@ A run starts after new mail, after a seed, from Vercel Cron or a `CRON_SECRET` c
 | Process lock for lane decisions | `queue.js` `lock`, `unlock` | `app_meta` insert and delete of `lock:process`; a lock older than 5 minutes is deleted first | None |
 | Decide the lane | `agent.js` `processEmail` | `cases` insert: `email_id`, `ticket_no`, `intent`, `label`, `customer_id`, `lane`, `status` (`new`, or `closed` for no action), `erp_status = 'none'`, `priority`, `sla_due_at`, `approver_role`, `summary`, `flags`, `checks`, `proposal`, `trace`, `model`. When the queue retries an email whose ticket was already inserted, the same columns except `email_id`, `ticket_no` and `erp_status` are updated, with `row_version + 1` and `updated_at` | `model_read` or `model_fallback` when the email has an `agent_reads` row (live model or replay); then `ticket_created` |
 | Auto-commit | `commitProposal` with actor `agent` | Section 4 | `auto_committed` |
-| Auto-commit refused at commit time | `agent.js` `processEmail` | `cases.lane = 'needs_review'`, `flags` with `COMMIT_REFUSED` added, `row_version + 1` | `commit_refused` |
-| Email that fails processing twice | `queue.js` `decide` | `cases` insert: `email_id`, `ticket_no`, `intent = 'other'`, `label = 'Other'`, `lane = 'needs_review'`, `status = 'new'`, `priority = 'high'`, `summary`, `flags` with `PROCESSING_ERROR` | None (see section 8) |
+| Auto-commit refused at commit time | `agent.js` `processEmail` | `cases.lane = 'needs_review'`, `flags` with `COMMIT_REFUSED` added, `row_version + 1`, `updated_at` | `commit_refused` |
+| Email that fails processing twice | `queue.js` `decide` | `cases` insert: `email_id`, `ticket_no`, `intent = 'other'`, `label = 'Other'`, `lane = 'needs_review'`, `status = 'new'`, `priority = 'high'`, `summary`, `flags` with `PROCESSING_ERROR` | `processing_failed`, actor `agent`, detail `error` |
 | Queue empty after a run | `queue.js` `runAgentQueue` | None | `queue_drained` |
 
 ## 4. `commitProposal`, the only writer to ERP tables after the seed
@@ -104,9 +104,9 @@ One transaction. It locks the `cases` row, the `customers` row and, for a change
 | Change, added line | `sales_order_lines` insert with the next `line_no` and `unit_price` from `priceFor`; `inventory` as for a new order |
 | Cancel | Per line, `inventory.allocated` minus the unshipped quantity and `available` plus it; `sales_orders.status = 'CANCELLED'` |
 
-On success, in the same transaction: `cases.erp_status = 'committed'`, `status = 'resolved'`, `proposal` (with `so_numbers`, `changed` or `cancelled`, `committed_by`, `committed_reason`), `row_version + 1`, `updated_at`, and the `auto_committed` or `approved_and_committed` audit row.
+On success, in the same transaction: `cases.erp_status = 'committed'`, `status = 'resolved'`, `proposal` (with `so_numbers`, `changed` or `cancelled`, `committed_by`, `committed_reason`), `assignee` (the approver, when a person approves and the ticket had none), `row_version + 1`, `updated_at`, and the `auto_committed` or `approved_and_committed` audit row.
 
-On any refusal every write above is rolled back, except the sequence: a number taken by `nextval` stays used. SO numbers are taken only after every line passed its checks, so only a credit refusal, which runs after the lines are written, leaves a gap in the SO numbers. When the re-checks refused it, the caller writes `commit_refused` with the reasons outside the transaction, so the attempt stays on record although nothing reached the ERP. The agent's own auto-commit writes `commit_refused` for every refusal.
+On any refusal every write above is rolled back, except the sequence: a number taken by `nextval` stays used. SO numbers are taken only after every line passed its checks, so only a credit refusal, which runs after the lines are written, leaves a gap in the SO numbers. For every refusal with 409 or 422 the caller writes `commit_refused` with the reasons outside the transaction, so the attempt stays on record although nothing reached the ERP. The agent's own auto-commit does the same.
 
 `customers.open_balance` and `customers.credit_limit` are read for the credit check and never written. A second commit of a committed ticket writes nothing and returns `already: true`.
 
@@ -121,10 +121,10 @@ On any refusal every write above is rolled back, except the sequence: a number t
 | Price dispute | E024, E025 | Approve (Credit and AR) | As above; the price comes from the ERP |
 | Injection attempt | E012 | Approve (Admin). Operations gets 403 | As above. The 403 writes only `access_denied` |
 | Stock short or discontinued | E008, E020, E033 | Approve, refused with 422 | Audit `commit_refused` with the errors only. ERP and `cases` unchanged |
-| Rejected draft | E019 | Reject with a reason (Operations) | `cases` (status `closed`, assignee, row_version, updated_at). Audit `rejected` |
+| Rejected draft | E019 | Reject with a reason (Operations; a credit-blocked ticket needs Credit and AR, a security-flagged one an Admin) | `cases` (status `closed`, assignee, row_version, updated_at). Audit `rejected` |
 | Order change | E004 | Approve (Operations) | `sales_order_lines` on SO-24051: line 1 quantity 20 to 25, new line 4 for 5 soap refills. `inventory`, `cases`, audit. No new order |
 | Cancellation | E017 | Approve (Operations) | `sales_orders` SO-24055 `OPEN` to `CANCELLED`, `inventory` allocated down and available up, `cases`, audit. Lines stay |
-| Quote | E009 | Approve returns 422 and writes nothing. Reply (Operations) | `outbox` (to_email, subject "Re: ...", body, sent_by), `cases` status `pending_customer`. Audit `reply_queued` |
+| Quote | E009 | Approve returns 422 and writes only `commit_refused`. Reply (Operations) | `outbox` (to_email, subject "Re: ...", body, sent_by), `cases` status `pending_customer`. Audit `reply_queued` |
 | Routed | E014 prospect (Operations), E018 return and E030 invoice (Credit and AR) | Reply | As for the quote |
 | Ask the customer | E022, E023, E026, E032, E035, E037 | Reply with the drafted question (Operations) | `outbox`, `cases` `new` to `pending_customer`. Audit `reply_queued`. The customer's answer arrives as a new email and a new ticket |
 | No action | E016 (PO sent again), E028 (out of office), E029 (spam) | None | `closed` since seed |
@@ -134,7 +134,7 @@ On any refusal every write above is rolled back, except the sequence: a number t
 The seed runs on the first request after a deploy, when the reader mode changes (rules, replay or model), when the seed version in `src/app.js` changes with the schema, and on Reset demo.
 
 1. `app_meta` is created if missing. The instance that inserts the claim row `seed:v4:<reader>` with `v = 'running'` seeds; the others wait. A claim older than 2 minutes is deleted and claimed again.
-2. `audit_archive` is created if missing. Every row of `audit_events` is copied into it: `id`, `at`, `actor`, `actor_type`, `email_id`, `action`, `detail`, plus `archived_at = now()`.
+2. `audit_archive` is created if missing. Every row of `audit_events` is copied into it (`id`, `at`, `actor`, `actor_type`, `email_id`, `action`, `detail`, plus `archived_at = now()`) and `audit_events` is dropped, both in one transaction, so a crash between them cannot copy the same rows twice.
 3. Every other table is dropped and recreated from `src/schema.sql`: the nine ERP tables, `emails`, `cases`, `comments`, `outbox`, `agent_reads`, `audit_events`, `users`, `sessions`. Everyone is signed out. The two sequences are created if missing and kept.
 4. ERP tables are loaded from `data/erp/*.csv`, `emails` from `data/inbox/*.eml` with each file's `Message-ID`, `users` with an Argon2id hash of `DEMO_PASSWORD`. `email_seq` is set so the next email is the count of emails plus one; `so_number_seq` so the next order is the highest loaded SO number plus one.
 5. `audit_events` gets `seeded`, actor `system`, detail `emails` and `archived` (rows copied in step 2).
@@ -160,7 +160,9 @@ The seed runs on the first request after a deploy, when the reader mode changes 
 | `ticket_created` | `agent` | `agent` | the email | `lane`, `intent`, `priority`, `model`, `flags` |
 | `auto_committed` | `agent` | `agent` | the email | `so_numbers`, `changed` or `cancelled`; `credit_released`, `value`, `reason`, `edited` |
 | `approved_and_committed` | username | `human` | the email | as `auto_committed` |
-| `commit_refused` | `agent` or username | `agent` or `human` | the email | `errors` |
+| `commit_refused` | `agent` or username | `agent` or `human` | the email | `errors`: the re-check reasons, or the message of a refusal before them |
+| `processing_failed` | `agent` | `agent` | the email | `error` |
+| `session_expired` | `system` | `system` | none | `username`, `reason` (`idle` or `absolute`) |
 | `reviewer_edited` | username | `human` | the email | `removed`, `added` (`<ship-to> <SKU> x <qty>`) |
 | `rejected` | username | `human` | the email | `reason` |
 | `assigned`, `unassigned` | username | `human` | the email | `to` |
@@ -169,21 +171,34 @@ The seed runs on the first request after a deploy, when the reader mode changes 
 | `reply_queued` | username | `human` | the email | `to`, `next_status` |
 | `queue_drained` | `agent` | `agent` | none | `total`, `read_by_model`, `model_failed` |
 
-## 8. Not recorded, and known gaps
+## 8. Fixed defects, and what is not recorded on purpose
 
-Fixed since version 1.0 of this document: a reset erased the audit trail and did not say who reset; sign-out, wrong passwords, lockouts and 403s wrote no audit row; reject and assign did not move `cases.updated_at`; wrong passwords sent at the same moment were all checked before the lock took hold; setting the status a ticket already had wrote a `status_changed` row; two emails or two approvals at the same moment could fail with a duplicate key, and two approvals sharing SKUs could deadlock; the same mail delivered twice made two tickets.
+Defects fixed on 11 November 2026, each with a test in `test/audit.test.mjs` or `test/concurrency.test.mjs`:
 
-- Reject and the Status menu have no role check. Any signed-in user can close a ticket that waits for Credit and AR or for Admin, including a security-flagged one. The `rejected` or `status_changed` row records who did it.
-- Reject accepts `row_version` from the console but does not compare it, so two people rejecting at once both succeed.
-- A person's approval refused straight away with 409 or 422 (section 4) leaves no audit row. Only refusals from the re-checks write `commit_refused`; a 403 writes `access_denied`.
-- An email parked with `PROCESSING_ERROR` gets a ticket and no audit row.
-- A request without a session (401) and a session that expires write no audit row.
+| Defect | Effect before the fix | Fix |
+|---|---|---|
+| A demo reset dropped `audit_events` | The trail before each reset was lost, and nothing said who reset | Rows move to `audit_archive` in one transaction with the drop; `demo_reset` names the Admin |
+| Sign-in events not recorded | Wrong passwords, lockouts, sign-outs and 403s left no row | `sign_in_failed`, `account_locked`, `signed_out`, `access_denied` |
+| Lockout checked before counting | Wrong passwords sent at the same moment were all checked: 18 of 20 in the test | The attempt is counted first, in one statement that skips a locked account; 20 at once get 5 guesses |
+| Anonymous audit rows unbounded | Anyone could add rows without signing in | At most 20 a minute per action and username, with an `audit_throttled` marker; wrong passwords on real accounts are never cut |
+| Email number from `count(*) + 1` | Emails arriving together failed with a duplicate key | Sequence `email_seq` |
+| SO number from the highest + 1 | Approvals at the same moment failed with a duplicate key | Sequence `so_number_seq` |
+| Stock rows locked in draft order | Two approvals sharing SKUs in opposite order deadlocked | All stock rows of a commit locked first, in SKU order |
+| Same mail delivered twice | A webhook retry made a second ticket | Unique on `Message-ID`, sender and text; the webhook gets the existing ticket back, the console a 409 |
+| Reject and closing had no role check | Operations could close a ticket waiting for Credit and AR or Admin, including a security-flagged one | `CAN.approve` on the server for Reject and for Resolved or Closed |
+| Reject ignored `row_version` | Two rejects at once both succeeded, and a reject could close a ticket an approval had just written | One statement checks the version and the ERP state; the loser gets 409 |
+| Some refusals not recorded | An approval refused with 409 or 422 before the re-checks, an email parked with `PROCESSING_ERROR`, and an expired session left no row | `commit_refused`, `processing_failed`, `session_expired` |
+| Writes to `cases` outside the commit | The approver became assignee in a second statement; an auto-commit refusal did not move `updated_at` | Assignee in the commit statement; `updated_at` on the refusal |
+| Reject, assign and same-status changes | Reject and assign did not move `updated_at`; setting the current status wrote a `status_changed` row | `updated_at` on both; the same status writes nothing |
+| Audit page read the newest 1000 rows | Searching missed older events, and a burst of new rows hid them; the archive had no screen | Search and paging in SQL over every row (300 per page, Show older); "Before resets" shows `audit_archive` |
+
+Not recorded on purpose:
+
+- A request without a session (401) writes no row. The console calls `/api/me` every time it opens, so each visit to the sign-in page would add one. The end of a real session is recorded as `session_expired` or `signed_out`.
+- Validation errors on a ticket action (an empty reason, an unknown assignee, an empty note) write no row. Nothing was decided.
 - Mail typed into the form has no `Message-ID`, so the same text typed twice makes two tickets. When the text names a customer PO, check D01 flags the second one (`DUPLICATE` and no action when the lines are the same).
-- After an approval, `cases.assignee` is set by a second statement outside the commit transaction, without `row_version` or `updated_at`. The commit set `updated_at` a moment earlier.
-- Auto-commit refused at commit time updates `cases` without `updated_at`. The ticket insert set it a moment earlier.
-- The copy to `audit_archive` and the drop of `audit_events` are separate statements. If the process stops between them, the retry copies the same rows again: duplicates in the archive, nothing lost.
-- Above 20 a minute of one anonymous action (per username where there is one), further rows are not recorded; one `audit_throttled` row marks the cut. Wrong passwords on real accounts are never cut. The console's audit page shows the latest 1000 rows, so a long flood pushes older events off that page; they stay in the table and on each ticket's own timeline.
-- `audit_archive` has no screen in the console. Read it with SQL, for example `select * from audit_archive order by archived_at desc, id desc`.
+- Above 20 a minute of one anonymous action (per username where there is one), further rows are not written; one `audit_throttled` row marks the cut.
+- Archived rows keep the ticket IDs they had. A reset reuses those IDs, so the archive view shows them as text, not as links to today's tickets.
 
 ## 9. Run it again
 
@@ -196,7 +211,7 @@ MODE=dead node scripts/db-writes.mjs           # what is written when the model 
 
 Each run uses a fresh database in a temporary folder and prints every step with its HTTP status and the rows it changed.
 
-The races in section 8 need a Postgres server that runs requests side by side. `test/concurrency.test.mjs` sends eight new emails at once, the same mail twice at once through the webhook, two approvals at once, and two approvals that take the same two SKUs in opposite order. Against a database it may wipe:
+The races in section 8 need a Postgres server that runs requests side by side. `test/concurrency.test.mjs` sends eight new emails at once, the same mail twice at once through the webhook, twenty wrong passwords at once, two approvals at once, and two approvals that take the same two SKUs in opposite order. Against a database it may wipe:
 
 ```bash
 TEST_DATABASE_URL=postgres://user@localhost:5432/scratch node --test test/concurrency.test.mjs

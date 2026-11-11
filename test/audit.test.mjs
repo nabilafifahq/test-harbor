@@ -1,5 +1,5 @@
-// The audit trail and ticket timestamps through the real HTTP API (rules reader, embedded Postgres, no network):
-// demo reset, sign-in events, refused requests, reject and assign.
+// The audit trail, ticket timestamps and the rules on ticket writes through the real HTTP API (rules reader,
+// embedded Postgres, no network): demo reset, sign-in events, refused requests, reject, assign, status and approve.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,7 +24,9 @@ async function call(p, { body = {}, cookie, headers = {} } = {}) {
   const r = await fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, body: JSON.stringify(body) });
   return { status: r.status, body: await r.json(), cookie: r.headers.get('set-cookie')?.split(';')[0] };
 }
+const get = async (p, cookie) => { const r = await fetch(base + p, { headers: cookie ? { cookie } : {} }); return { status: r.status, body: await r.json() }; };
 const signIn = async (username) => (await call('/api/login', { body: { username, password: PASSWORD } })).cookie;
+const ticket = async (id) => (await db.query('select status, assignee, row_version, erp_status from cases where email_id=$1', [id])).rows[0];
 const events = async (action) => (await db.query('select * from audit_events where action=$1 order by id', [action])).rows;
 const count = async (table) => (await db.query(`select count(*)::int as n from ${table}`)).rows[0].n;
 
@@ -114,6 +116,73 @@ test('a flood of unknown usernames is cut at 20 a minute, says so, and does not 
   assert.equal(await recent("action = 'sign_in_failed' and detail->>'username' = 'admin' and detail->>'reason' = 'wrong_password'"), 1);
 });
 
+test('reject and closing a ticket need the role that approves it; the server checks, not the console', async () => {
+  const ops = await signIn('ops');
+  const before = await ticket('E006'); // CREDIT_BLOCK: Credit and AR or Admin
+  assert.equal((await call('/api/tickets/E006/reject', { cookie: ops, body: { reason: 'Not ours to decide.' } })).status, 403);
+  assert.equal((await call('/api/tickets/E006/status', { cookie: ops, body: { status: 'closed' } })).status, 403);
+  assert.equal((await call('/api/tickets/E012/status', { cookie: ops, body: { status: 'resolved' } })).status, 403); // security flag: Admin
+  assert.deepEqual(await ticket('E006'), before);
+  assert.equal((await call('/api/tickets/E006/status', { cookie: ops, body: { status: 'pending_customer' } })).status, 200, 'waiting on the customer decides nothing');
+  const admin = await signIn('admin');
+  assert.equal((await call('/api/tickets/E012/reject', { cookie: admin, body: { reason: 'Injection attempt, not a real order.' } })).status, 200);
+  assert.equal((await get('/api/tickets/E006', ops)).body.can.close, false);
+  assert.equal((await get('/api/tickets/E006', admin)).body.can.close, true);
+});
+
+test('two people rejecting the same version at once: one closes it, the other is told to reload', async () => {
+  const ops = await signIn('ops');
+  const { row_version } = await ticket('E020');
+  const res = await Promise.all([1, 2].map(() => call('/api/tickets/E020/reject', { cookie: ops, body: { reason: 'Discontinued item.', row_version } })));
+  assert.deepEqual(res.map((r) => r.status).sort(), [200, 409]);
+  assert.equal((await events('rejected')).filter((a) => a.email_id === 'E020').length, 1);
+});
+
+test('an approval refused straight away (409 or 422) is audited', async () => {
+  const ops = await signIn('ops');
+  assert.equal((await call('/api/tickets/E009/approve', { cookie: ops })).status, 422); // a quote writes nothing
+  assert.equal((await call('/api/tickets/E002/approve', { cookie: ops, body: { row_version: 999 } })).status, 409);
+  assert.deepEqual((await events('commit_refused')).filter((a) => a.actor === 'ops').map((a) => a.email_id), ['E009', 'E002']);
+});
+
+test('an approval sets the assignee in the same write as the commit', async () => {
+  const ops = await signIn('ops');
+  const { row_version } = await ticket('E002');
+  assert.equal((await call('/api/tickets/E002/approve', { cookie: ops, body: { row_version } })).status, 200);
+  assert.deepEqual(await ticket('E002'), { status: 'resolved', assignee: 'ops', row_version: row_version + 1, erp_status: 'committed' });
+});
+
+test('an email the agent cannot process is parked for a person, with an audit row', async () => {
+  const { runAgentQueue } = await import('../src/queue.js');
+  // Stands in for a bug the code does not expect: every ticket write for E099 fails, except the parked one.
+  await db.exec(`create function fail_e099() returns trigger language plpgsql as $$ begin
+      if new.email_id = 'E099' and not new.flags @> '[{"code":"PROCESSING_ERROR"}]' then raise exception 'simulated failure'; end if;
+      return new; end $$;
+    create trigger fail_e099 before insert or update on cases for each row execute function fail_e099();`);
+  await db.query("insert into emails (email_id, ticket_no, received_at, from_email, body) values ('E099', 'HP-1099', now(), 'odd@example.com', 'Please send 2 x HPS-1408.')");
+  try { await runAgentQueue(db, { autoCommit: false }); }
+  finally { await db.exec('drop trigger fail_e099 on cases; drop function fail_e099();'); }
+  assert.ok((await db.query("select flags from cases where email_id='E099'")).rows[0].flags.some((f) => f.code === 'PROCESSING_ERROR'));
+  assert.deepEqual((await events('processing_failed')).map((a) => [a.actor, a.email_id]), [['agent', 'E099']]);
+});
+
+test('a session that expires is audited', async () => {
+  const ops = await signIn('ops');
+  await db.query("update sessions set last_seen_at = now() - interval '2 hours'");
+  assert.equal((await get('/api/me', ops)).status, 401);
+  assert.ok((await events('session_expired')).some((a) => a.detail.username === 'ops' && a.detail.reason === 'idle'));
+});
+
+test('the audit page searches every event, not only the newest 1000, and pages', async () => {
+  const ops = await signIn('ops');
+  assert.equal((await call('/api/tickets/E030/comment', { cookie: ops, body: { body: 'Checked the invoice.' } })).status, 200);
+  await db.query("insert into audit_events (actor, actor_type, action) select 'filler', 'system', 'filler' from generate_series(1, 1100)");
+  assert.ok((await get('/api/audit?q=note', ops)).body.some((a) => a.action === 'note_added' && a.email_id === 'E030'));
+  const first = (await get('/api/audit', ops)).body, second = (await get('/api/audit?offset=300', ops)).body;
+  assert.equal(first.length, 300);
+  assert.ok(second.length > 0 && second[0].id < first.at(-1).id);
+});
+
 // Last: a reset signs everyone out and reloads every ticket.
 test('a demo reset keeps the earlier audit trail and records who reset', async () => {
   const admin = await signIn('admin');
@@ -128,4 +197,7 @@ test('a demo reset keeps the earlier audit trail and records who reset', async (
   assert.equal((await events('seeded')).at(-1).detail.archived, before);
   assert.deepEqual((await events('demo_reset')).map((a) => [a.actor, a.actor_type]), [['admin', 'human']]);
   assert.equal((await events('note_added')).length, 0, 'the reloaded tickets start with a clean timeline');
+  const admin2 = await signIn('admin');
+  const old = (await get('/api/audit?archive=1&q=note', admin2)).body;
+  assert.ok(old.some((a) => a.action === 'note_added' && a.actor === 'admin' && a.email_id === 'E019'), 'the console shows the archive');
 });

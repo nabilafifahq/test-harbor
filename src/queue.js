@@ -76,6 +76,7 @@ export async function runAgentQueue(db, { budgetMs = Number(process.env.AGENT_BU
           catch (err2) {
             await db.query(`insert into cases (email_id, ticket_no, intent, label, lane, status, priority, summary, flags) values ($1,$2,'other','Other','needs_review','new','high',$3,$4::jsonb) on conflict do nothing`,
               [e.email_id, e.ticket_no, 'The agent could not process this email. Read it and handle it by hand.', JSON.stringify([{ code: 'PROCESSING_ERROR', text: String(err2.message || err2).slice(0, 300), severity: 'bad' }])]);
+            await audit(db, 'agent', 'agent', e.email_id, 'processing_failed', { error: String(err2.message || err2).slice(0, 300) });
           }
         }
         n++;

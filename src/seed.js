@@ -44,8 +44,13 @@ export function readInbox(dataDir) {
 export async function seed(q, dataDir, password) {
   // A reseed replaces the demo data, never the audit trail: earlier events move to audit_archive, which is not dropped.
   await q.exec('create table if not exists audit_archive (id bigint, at timestamptz, actor text, actor_type text, email_id text, action text, detail jsonb, archived_at timestamptz not null default now())');
+  // Copy and drop in one transaction, so a crash between them cannot copy the same rows twice.
   const archived = (await q.query("select to_regclass('audit_events') is not null as present")).rows[0].present
-    ? (await q.query('with moved as (insert into audit_archive (id, at, actor, actor_type, email_id, action, detail) select id, at, actor, actor_type, email_id, action, detail from audit_events returning 1) select count(*)::int as n from moved')).rows[0].n
+    ? await q.tx(async (t) => {
+      const n = (await t.query('with moved as (insert into audit_archive (id, at, actor, actor_type, email_id, action, detail) select id, at, actor, actor_type, email_id, action, detail from audit_events returning 1) select count(*)::int as n from moved')).rows[0].n;
+      await t.query('drop table audit_events cascade');
+      return n;
+    })
     : 0;
   await q.exec(TABLES.map((t) => `drop table if exists ${t} cascade;`).join('\n'));
   await q.exec(fs.readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));

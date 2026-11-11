@@ -1,6 +1,7 @@
 // Sign-in, sessions and roles. Session tokens live only in an httpOnly cookie; the database keeps a SHA-256 of the token.
 import crypto from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
+import { audit } from './agent.js';
 
 const ARGON = { memoryCost: 19456, timeCost: 2, parallelism: 1 }; // OWASP Password Storage Cheat Sheet, Argon2id minimum
 export const SESSION_IDLE_MS = 60 * 60 * 1000;      // 1 hour idle
@@ -45,8 +46,10 @@ export async function sessionUser(q, token) {
   const s = (await q.query('select s.*, u.display_name, u.role from sessions s join users u using (username) where token_hash=$1', [sha(token)])).rows[0];
   if (!s) return null;
   const now = Date.now();
-  if (now - new Date(s.created_at).getTime() > SESSION_ABSOLUTE_MS || now - new Date(s.last_seen_at).getTime() > SESSION_IDLE_MS) {
-    await q.query('delete from sessions where token_hash=$1', [sha(token)]);
+  const old = now - new Date(s.created_at).getTime() > SESSION_ABSOLUTE_MS;
+  if (old || now - new Date(s.last_seen_at).getTime() > SESSION_IDLE_MS) {
+    // Recorded once: only the request whose delete removed the row writes it.
+    if ((await q.query('delete from sessions where token_hash=$1 returning 1', [sha(token)])).rows.length) await audit(q, 'system', 'system', null, 'session_expired', { username: s.username, reason: old ? 'absolute' : 'idle' });
     return null;
   }
   await q.query('update sessions set last_seen_at=now() where token_hash=$1', [sha(token)]);

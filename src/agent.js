@@ -381,7 +381,7 @@ export async function processEmail(db, email, { autoCommit = true, matcher, read
       // Stock or credit changed between the checks and the commit: nothing was written, a person takes over.
       lane = 'needs_review';
       flags.push({ code: 'COMMIT_REFUSED', text: `The ERP refused the order at commit time: ${e.message}`, severity: 'bad' });
-      await db.query("update cases set lane='needs_review', flags=$2::jsonb, row_version=row_version+1 where email_id=$1", [email.email_id, JSON.stringify(flags)]);
+      await db.query("update cases set lane='needs_review', flags=$2::jsonb, row_version=row_version+1, updated_at=now() where email_id=$1", [email.email_id, JSON.stringify(flags)]);
       await audit(db, 'agent', 'agent', email.email_id, 'commit_refused', { errors: e.audit?.errors || [e.message] });
     }
   }
@@ -568,7 +568,8 @@ export async function commitProposal(db, emailId, { actor, actorType = 'human', 
       throw e;
     }
     const proposal = { ...p, ...result, committed_by: actor, committed_reason: reason || null };
-    await t.query("update cases set erp_status='committed', status='resolved', proposal=$2::jsonb, row_version=row_version+1, updated_at=now() where email_id=$1", [emailId, JSON.stringify(proposal)]);
+    // A person who approves becomes the assignee when there is none, in this same write.
+    await t.query("update cases set erp_status='committed', status='resolved', proposal=$2::jsonb, assignee=case when $3='human' then coalesce(assignee,$4) else assignee end, row_version=row_version+1, updated_at=now() where email_id=$1", [emailId, JSON.stringify(proposal), actorType, actor]);
     await audit(t, actor, actorType, emailId, actorType === 'agent' ? 'auto_committed' : 'approved_and_committed', { ...result, value: money(added), reason: reason || null, edited: Boolean(edited) });
     return { ok: true, ...result };
   });

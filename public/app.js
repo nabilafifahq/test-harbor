@@ -646,7 +646,14 @@ async function renderTicket(id) {
   };
   $('#add-note').onclick = async () => { try { await api(`/api/tickets/${id}/comment`, { method: 'POST', body: { body: $('#note').value } }); renderTicket(id); } catch (err) { snack(err.message); } };
   $('#assign-btn').onclick = (e) => { e.stopPropagation(); openMenu(e.currentTarget, [{ html: `${icon('person')} Assign to me`, run: () => act('assign', { assignee: 'me' }) }, ...users.filter((u) => u.username !== me.username).map((u) => ({ html: `<span class="avatar sm">${initials(u.display_name)}</span> ${esc(u.display_name)} <span class="muted body-s">${ROLE[u.role]}</span>`, run: () => act('assign', { assignee: u.username }) })), 'hr', { html: `${icon('person_off')} Unassign`, run: () => act('assign', { assignee: null }) }]); };
-  $('#status-btn').onclick = (e) => { e.stopPropagation(); openMenu(e.currentTarget, ['open', 'pending_customer', 'resolved', 'closed'].map((s) => ({ html: STATUS[s], checked: t.status === s, run: () => act('status', { status: s }) }))); };
+  $('#status-btn').onclick = (e) => {
+    e.stopPropagation();
+    // Resolving or closing decides the ticket, so it needs the role that approves it. The server refuses it too.
+    openMenu(e.currentTarget, ['open', 'pending_customer', 'resolved', 'closed'].map((s) => {
+      const locked = ['resolved', 'closed'].includes(s) && !t.can.close && t.status !== s;
+      return { html: locked ? `${STATUS[s]} <span class="body-s muted">(${ROLE[roleNeeded] || 'another role'} only)</span>` : STATUS[s], checked: t.status === s, disabled: locked, run: () => act('status', { status: s }) };
+    }));
+  };
   async function act(action, body) { try { await api(`/api/tickets/${id}/${action}`, { method: 'POST', body }); renderTicket(id); } catch (err) { snack(err.message); } }
   main.focus();
 }
@@ -674,18 +681,36 @@ async function renderStock() {
   $('#s-sku').onclick = () => { sort = 'sku'; $('#s-sku').classList.add('on'); $('#s-short').classList.remove('on'); draw($('#sf').value); };
 }
 
-async function renderAudit(q = '', type = '') {
+async function renderAudit(q = '', type = '', archive = false) {
   shell('audit');
   const main = $('#main');
-  const rows = await api(`/api/audit?${new URLSearchParams({ q, actor_type: type })}`);
-  main.innerHTML = `<div class="page"><h1 class="title-l">Audit log</h1><p class="muted">Every agent step and every human decision, newest first. Entries cannot be edited from the app.</p>
-    <div class="toolbar" style="padding-left:0;border:0"><div class="search-box" style="height:40px;max-width:360px">${icon('search')}<input id="af" value="${esc(q)}" placeholder="Search actions, tickets, people" aria-label="Search audit log"></div>
-    ${[['', 'Everyone'], ['agent', 'Agent'], ['human', 'People'], ['system', 'System']].map(([k, l]) => `<button class="chip ${type === k ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Who</th><th>Ticket</th><th>Action</th><th>Details</th></tr></thead><tbody>
-    ${rows.map((a) => `<tr><td class="body-s">${stamp(a.at)}</td><td><span class="avatar sm ${a.actor_type === 'agent' ? 'agent' : ''}">${a.actor_type === 'agent' ? 'AI' : initials(a.actor)}</span> ${esc(a.actor)}</td><td>${a.email_id ? `<a href="#/t/${a.email_id}">${esc(a.ticket_no || a.email_id)}</a>` : ''}</td><td>${esc(a.action.replace(/_/g, ' '))}</td><td class="body-s muted" style="max-width:520px">${esc(JSON.stringify(a.detail))}</td></tr>`).join('')}
-    </tbody></table></div></div>`;
-  $('#af').oninput = debounce((e) => { renderAudit(e.target.value, type).then(() => { const el = $('#af'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }); }, 300);
-  $$('[data-t]').forEach((b) => b.onclick = () => renderAudit($('#af').value, b.dataset.t));
+  const PAGE = 300; // the server sends at most this many rows per request
+  const query = (offset) => new URLSearchParams({ q, actor_type: type, offset, ...(archive ? { archive: '1' } : {}) });
+  const rows = await api(`/api/audit?${query(0)}`);
+  // Archived rows come from before a reset; their ticket IDs were reused after it, so they are not links.
+  const row = (a) => `<tr><td class="body-s">${stamp(a.at)}</td><td><span class="avatar sm ${a.actor_type === 'agent' ? 'agent' : ''}">${a.actor_type === 'agent' ? 'AI' : initials(a.actor)}</span> ${esc(a.actor)}</td><td>${a.email_id ? (archive ? esc(a.email_id) : `<a href="#/t/${a.email_id}">${esc(a.ticket_no || a.email_id)}</a>`) : ''}</td><td>${esc(a.action.replace(/_/g, ' '))}</td><td class="body-s muted" style="max-width:520px">${esc(JSON.stringify(a.detail))}</td></tr>`;
+  main.innerHTML = `<div class="page"><h1 class="title-l">Audit log</h1><p class="muted">${archive ? 'Events from before each demo reset, newest reset first. They were moved here when the demo was reset and cannot be edited.' : 'Every agent step and every human decision, newest first. Entries cannot be edited from the app.'}</p>
+    <div class="toolbar" style="padding-left:0;border:0;flex-wrap:wrap"><div class="search-box" style="height:40px;max-width:360px">${icon('search')}<input id="af" value="${esc(q)}" placeholder="Search actions, tickets, people" aria-label="Search audit log"></div>
+    ${[['', 'Everyone'], ['agent', 'Agent'], ['human', 'People'], ['system', 'System']].map(([k, l]) => `<button class="chip ${type === k ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}
+    <button class="chip ${archive ? 'on' : ''}" id="archive" aria-pressed="${archive}">Before resets</button></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Who</th><th>Ticket</th><th>Action</th><th>Details</th></tr></thead><tbody id="audit-rows">
+    ${rows.length ? rows.map(row).join('') : `<tr><td colspan="5" class="muted">${archive ? 'Nothing archived yet. Rows move here when an Admin resets the demo.' : 'No events match.'}</td></tr>`}
+    </tbody></table></div>
+    <div class="actions">${rows.length === PAGE ? '<button class="btn btn-text" id="older">Show older</button>' : ''}</div></div>`;
+  let shown = rows.length;
+  $('#older')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget; // currentTarget is null once the handler awaits
+    btn.disabled = true;
+    const more = await api(`/api/audit?${query(shown)}`).catch((err) => { snack(err.message); return null; });
+    btn.disabled = false;
+    if (!more) return;
+    $('#audit-rows').insertAdjacentHTML('beforeend', more.map(row).join(''));
+    shown += more.length;
+    if (more.length < PAGE) btn.remove();
+  });
+  $('#af').oninput = debounce((e) => { renderAudit(e.target.value, type, archive).then(() => { const el = $('#af'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }); }, 300);
+  $$('[data-t]').forEach((b) => b.onclick = () => renderAudit($('#af').value, b.dataset.t, archive));
+  $('#archive').onclick = () => renderAudit($('#af').value, type, !archive);
 }
 
 async function renderResults() {
