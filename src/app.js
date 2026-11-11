@@ -28,7 +28,8 @@ let ready = false;
 const DEFAULT_REPLAY = path.join(DATA_DIR, 'model-run', 'deepseek-v4-flash-0731.reads.json');
 export const replayFile = () => (llmConfigured() || process.env.LLM_MODE === 'off' ? '' : process.env.AGENT_REPLAY || (fs.existsSync(DEFAULT_REPLAY) ? DEFAULT_REPLAY : ''));
 // The seed is tied to the reader: adding a model key reloads the inbox once and lets the live model read it.
-const SEED_KEY = () => `seed:v3:${llmConfigured() ? 'model' : replayFile() ? 'replay' : 'rules'}`;
+// The version goes up with the schema, so a deploy that changes the schema reseeds once.
+const SEED_KEY = () => `seed:v4:${llmConfigured() ? 'model' : replayFile() ? 'replay' : 'rules'}`;
 export async function runPipeline(db) {
   await seed(db, DATA_DIR, PASSWORD);
   // Replay a recorded model run (scripts/eval.mjs writes it): the same readings and tool traces, no key needed.
@@ -88,14 +89,26 @@ async function ingest(db, b, by) {
   const e = typeof b.raw === 'string' && b.raw.trim() ? parseEml(b.raw.slice(0, 200000)) : { from_name: str(b.from_name, 200), from_email: str(b.from_email, 200).toLowerCase(), subject: str(b.subject, 300), body: str(b.body, 20000), attachments: [] };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.from_email || '')) throw httpErr(422, 'Add the sender address, for example chef@oakandember.example.');
   if (!str(e.body)) throw httpErr(422, 'The email body is empty. Paste the text of the email.');
+  // The same Message-ID is the same mail: a webhook retry or a second upload. It never makes a second ticket.
+  // The provider gets the existing ticket back so it stops retrying; a person is told where the email already is.
+  const duplicate = async () => {
+    const d = (await db.query('select email_id, ticket_no from emails where message_id=$1', [e.message_id])).rows[0];
+    await audit(db, by, by === 'inbound' ? 'system' : 'human', d.email_id, 'email_duplicate', { message_id: e.message_id });
+    if (by !== 'inbound') throw httpErr(409, `This email is already in the inbox as ${d.ticket_no}. Open that ticket from the queue.`);
+    return { email_id: d.email_id, ticket_no: d.ticket_no, queued: false, duplicate: true };
+  };
+  if (e.message_id && (await db.query('select 1 from emails where message_id=$1', [e.message_id])).rows.length) return duplicate();
   const n = Number((await db.query('select count(*)::int as n from emails')).rows[0].n);
   if (n >= Number(process.env.MAX_EMAILS || 300)) throw httpErr(429, 'The demo inbox is full. An Admin can reset the demo.');
   const last = (await db.query('select max(received_at) as m from emails')).rows[0].m;
   // The demo runs on the inbox day, so new mail lands just after the last email or at the demo clock.
   const at = new Date(Math.max(new Date(last).getTime() + 60000, new Date(DEMO_NOW).getTime())).toISOString();
-  const id = `E${String(n + 1).padStart(3, '0')}`;
-  const ticket = `HP-${1001 + n}`;
-  await db.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)', [id, ticket, at, e.from_name || e.from_email, e.from_email, e.subject || '(no subject)', e.body.slice(0, 20000), JSON.stringify(e.attachments || [])]);
+  // From a sequence, so emails that arrive together never get the same number.
+  const no = Number((await db.query("select nextval('email_seq') as n")).rows[0].n);
+  const id = `E${String(no).padStart(3, '0')}`;
+  const ticket = `HP-${1000 + no}`;
+  const ins = await db.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) on conflict (message_id) do nothing returning email_id', [id, ticket, at, e.from_name || e.from_email, e.from_email, e.subject || '(no subject)', e.body.slice(0, 20000), JSON.stringify(e.attachments || []), e.message_id || null]);
+  if (!ins.rows.length) return duplicate(); // the same mail arrived in another request a moment earlier
   await enqueue(db, [id]);
   await audit(db, by, by === 'inbound' ? 'system' : 'human', null, 'email_received', { email_id: id, ticket_no: ticket, from: e.from_email, source: b.raw ? 'eml' : 'form' });
   if (!llmConfigured()) await runAgentQueue(db, { autoCommit: AUTO_COMMIT }); // rules only: instant
@@ -280,11 +293,11 @@ export async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname.replace(/\/+$/, '') || '/';
   const cid = crypto.randomUUID().slice(0, 8);
-  let db;
+  let db, user;
   try {
     if (p === '/api/health') return send(res, 200, { ok: true });
-    if (req.method !== 'GET' && !sameOrigin(req)) throw httpErr(403, 'Cross-site request refused.');
     db = await getDb();
+    if (req.method !== 'GET' && !sameOrigin(req)) throw httpErr(403, 'Cross-site request refused.');
     await ensureReady(db);
     // Public, counts only: lets an operator or a monitor see whether the inbox has been read, without signing in.
     if (p === '/api/status') {
@@ -310,13 +323,19 @@ export async function handle(req, res) {
     if (p === '/api/login' && req.method === 'POST') {
       const b = await readBody(req);
       const r = await login(db, str(b.username, 64), str(b.password, 256));
-      if (r.error) return send(res, r.status, { error: r.error });
+      if (r.error) {
+        // The caller is not signed in, so the actor is anonymous. A username nobody has is not stored: people type passwords into that box.
+        await audit(db, 'anonymous', 'human', null, 'sign_in_failed', { reason: r.reason, ...(r.username ? { username: r.username } : {}), ...(r.failed ? { failed_count: r.failed } : {}) });
+        if (r.locked) await audit(db, 'system', 'system', null, 'account_locked', { username: r.username, failed_count: r.failed });
+        return send(res, r.status, { error: r.error });
+      }
       await audit(db, r.user.username, 'human', null, 'signed_in', {});
       return send(res, 200, { user: r.user }, { 'set-cookie': `${cname}=${r.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_ABSOLUTE_MS / 1000}${secure ? '; Secure' : ''}` });
     }
-    const user = await sessionUser(db, token);
+    user = await sessionUser(db, token);
     if (p === '/api/logout' && req.method === 'POST') {
       await logout(db, token);
+      if (user) await audit(db, user.username, 'human', null, 'signed_out', {});
       return send(res, 200, { ok: true }, { 'set-cookie': `${cname}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}` });
     }
     if (!user) throw httpErr(401, 'Please sign in.');
@@ -346,6 +365,7 @@ export async function handle(req, res) {
       await db.query("delete from app_meta where k like 'seed:%'");
       ready = false;
       await ensureReady(db);
+      await audit(db, user.username, 'human', null, 'demo_reset', {});
       return send(res, 200, { ok: true, queue: await queueStatus(db) });
     }
 
@@ -382,20 +402,21 @@ export async function handle(req, res) {
         const reason = str(b.reason, 500);
         if (!reason) throw httpErr(422, 'Add a short reason so the next person knows why.');
         if (t.erp_status === 'committed') throw httpErr(409, 'This is already in the ERP. Open a cancellation instead.');
-        await db.query("update cases set status='closed', assignee=coalesce(assignee,$2), row_version=row_version+1 where email_id=$1", [id, user.username]);
+        await db.query("update cases set status='closed', assignee=coalesce(assignee,$2), row_version=row_version+1, updated_at=now() where email_id=$1", [id, user.username]);
         await audit(db, user.username, 'human', id, 'rejected', { reason });
         return send(res, 200, { ok: true });
       }
       if (action === 'assign') {
         const who = b.assignee === 'me' ? user.username : b.assignee ? str(b.assignee, 32) : null;
         if (who && !(await db.query('select 1 from users where username=$1', [who])).rows.length) throw httpErr(422, 'Unknown user.');
-        await db.query("update cases set assignee=$2, status=case when status='new' then 'open' else status end, row_version=row_version+1 where email_id=$1", [id, who]);
+        await db.query("update cases set assignee=$2, status=case when status='new' then 'open' else status end, row_version=row_version+1, updated_at=now() where email_id=$1", [id, who]);
         await audit(db, user.username, 'human', id, who ? 'assigned' : 'unassigned', { to: who });
         return send(res, 200, { ok: true });
       }
       if (action === 'status') {
         const s = str(b.status, 20);
         if (!['open', 'pending_customer', 'resolved', 'closed'].includes(s)) throw httpErr(422, 'Unknown status.');
+        if (s === t.status) return send(res, 200, { ok: true, unchanged: true }); // nothing changes, so nothing is written
         await touch(s);
         await audit(db, user.username, 'human', id, 'status_changed', { from: t.status, to: s, note: str(b.reason, 500) || null });
         return send(res, 200, { ok: true });
@@ -423,6 +444,8 @@ export async function handle(req, res) {
     throw httpErr(404, 'Not found.');
   } catch (e) {
     if (!e.status || e.status >= 500) console.error(cid, e);
+    // Every refused request is recorded here, so a 403 added later is covered too. A failed audit write does not hide the 403.
+    if (e.status === 403 && db) await audit(db, user?.username || 'anonymous', 'human', p.match(/^\/api\/tickets\/(E\d{3})/)?.[1] || null, 'access_denied', { method: req.method, path: p, error: e.message }).catch((err) => console.error(cid, err));
     return send(res, e.status || 500, { error: e.status ? e.message : `Something went wrong on our side. Reference ${cid}.` });
   }
 }

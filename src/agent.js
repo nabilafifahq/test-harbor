@@ -470,6 +470,9 @@ export async function commitProposal(db, emailId, { actor, actorType = 'human', 
     let added = 0;
     const cust = (await t.query('select status from customers where customer_id=$1 for update', [c.customer_id])).rows[0];
     const stockRow = async (sku) => (await t.query('select p.status, p.list_price, i.available from products p join inventory i using (sku) where sku=$1 for update of i', [sku])).rows[0];
+    // Every stock row this commit writes is locked first, in SKU order, so two commits that share SKUs wait
+    // for each other instead of locking them in opposite order and deadlocking.
+    const lockStock = (skus) => t.query('select sku from inventory where sku = any($1::text[]) order by sku for update', [skus]);
     const unitPrice = async (sku) => (await priceFor(t, c.customer_id, sku)).unit_price;
     let result = {};
 
@@ -478,12 +481,14 @@ export async function commitProposal(db, emailId, { actor, actorType = 'human', 
       if (!so) throw httpErr(422, 'The order to cancel was not found.');
       if (so.status !== 'OPEN') throw httpErr(422, `${p.target.so_number} is ${so.status} and cannot be cancelled.`);
       const lines = (await t.query('select sku, qty_ordered, qty_shipped from sales_order_lines where so_number=$1', [p.target.so_number])).rows;
+      await lockStock(lines.map((l) => l.sku));
       for (const l of lines) await t.query('update inventory set allocated=allocated-$2, available=available+$2 where sku=$1', [l.sku, l.qty_ordered - l.qty_shipped]);
       await t.query("update sales_orders set status='CANCELLED' where so_number=$1", [p.target.so_number]);
       result = { cancelled: p.target.so_number };
     } else if (p.kind === 'change') {
       const so = (await t.query('select status from sales_orders where so_number=$1 for update', [p.target?.so_number])).rows[0];
       if (!so || so.status === 'SHIPPED' || so.status === 'CANCELLED') throw httpErr(422, `${p.target?.so_number || 'Order'} cannot be edited (${so?.status || 'not found'}).`);
+      await lockStock((p.ops || []).map((op) => op.sku));
       for (const op of p.ops || []) {
         const s = await stockRow(op.sku);
         if (s.status !== 'ACTIVE') { errors.push(`${op.sku} is discontinued`); continue; }
@@ -514,7 +519,7 @@ export async function commitProposal(db, emailId, { actor, actorType = 'human', 
         for (const o of orders) if (!own.has(o.ship_to_id)) errors.push(`Delivery address ${o.ship_to_id} does not belong to this customer`);
       }
       const soNumbers = [];
-      let next = Number((await t.query('select max(cast(substr(so_number,4) as int)) as m from sales_orders')).rows[0].m) + 1;
+      await lockStock(orders.flatMap((o) => o.lines.map((l) => l.sku)));
       const priced = [];
       for (const o of orders) {
         const lines = [];
@@ -533,7 +538,7 @@ export async function commitProposal(db, emailId, { actor, actorType = 'human', 
       }
       if (!errors.length) {
         for (const o of priced) {
-          const so = `SO-${next++}`;
+          const so = (await t.query("select 'SO-' || nextval('so_number_seq') as so")).rows[0].so; // a sequence: approvals at the same moment never share a number
           await t.query("insert into sales_orders values ($1,$2,$3,$4,$5,$6,'OPEN',$7,$8)", [so, c.customer_id, o.ship_to_id, p.customer_po || '', BUSINESS_DATE, p.requested_date || null, emailId, actor]);
           let n = 1;
           for (const l of o.lines) {

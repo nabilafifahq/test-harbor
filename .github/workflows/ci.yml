@@ -30,6 +30,12 @@ jobs:
       - run: npm ci
       - name: Unit tests and 40-email smoke test (embedded Postgres, no model)
         run: npm test
+      - name: Requests at the same moment against Postgres 17 (email IDs, SO numbers, stock locks)
+        env:
+          TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/harbor_test
+        run: |
+          psql postgres://postgres:ci@localhost:5432/postgres -c 'create database harbor_test'
+          node --test test/concurrency.test.mjs
       - name: Boot against Postgres 17 and sign in
         env:
           DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres

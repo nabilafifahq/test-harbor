@@ -10,7 +10,7 @@ create table sales_orders (so_number text primary key, customer_id text referenc
 create table sales_order_lines (so_number text references sales_orders, line_no int, sku text, qty_ordered int not null, qty_shipped int not null default 0, unit_price numeric(12,2) not null, primary key (so_number, line_no));
 
 -- Inbox and tickets
-create table emails (email_id text primary key, ticket_no text unique, received_at timestamptz not null, from_name text, from_email text, subject text, body text, attachments jsonb not null default '[]');
+create table emails (email_id text primary key, ticket_no text unique, received_at timestamptz not null, from_name text, from_email text, subject text, body text, attachments jsonb not null default '[]', message_id text unique);
 create table cases (
   email_id text primary key references emails,
   ticket_no text unique,
@@ -35,6 +35,10 @@ create table audit_events (id bigserial primary key, at timestamptz not null def
 -- People and sessions
 create table users (username text primary key, display_name text not null, role text not null check (role in ('ops','credit','admin')), password_hash text not null, failed_count int not null default 0, locked_until timestamptz);
 create table sessions (token_hash text primary key, username text references users on delete cascade, created_at timestamptz not null default now(), last_seen_at timestamptz not null default now());
+
+-- Email and SO numbers, safe when requests arrive together. A reseed keeps the sequences; seed.js moves them past the loaded rows.
+create sequence if not exists email_seq;
+create sequence if not exists so_number_seq;
 
 create index on customer_contacts (lower(email));
 create index on sales_orders (customer_id, customer_po);

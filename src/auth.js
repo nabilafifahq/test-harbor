@@ -26,10 +26,10 @@ export async function login(q, username, password) {
   const u = (await q.query('select * from users where username=$1', [String(username || '').toLowerCase()])).rows[0];
   // Same work whether or not the account exists, so response time does not reveal valid usernames.
   const ok = u ? await verify(u.password_hash, String(password || '')).catch(() => false) : (await hashPassword('timing-equaliser'), false);
-  if (u && u.locked_until && new Date(u.locked_until) > new Date()) return { error: 'Too many attempts. Wait a few minutes and try again.', status: 429 };
+  if (u && u.locked_until && new Date(u.locked_until) > new Date()) return { error: 'Too many attempts. Wait a few minutes and try again.', status: 429, username: u.username, reason: 'locked' };
   if (!ok) {
-    if (u) await q.query(`update users set failed_count=failed_count+1, locked_until=case when failed_count+1>=$2 then now()+interval '${LOCK_MINUTES} minutes' else locked_until end where username=$1`, [u.username, LOCK_AFTER]);
-    return { error: 'That username and password do not match.', status: 401 };
+    const failed = u ? (await q.query(`update users set failed_count=failed_count+1, locked_until=case when failed_count+1>=$2 then now()+interval '${LOCK_MINUTES} minutes' else locked_until end where username=$1 returning failed_count`, [u.username, LOCK_AFTER])).rows[0].failed_count : 0;
+    return { error: 'That username and password do not match.', status: 401, username: u?.username, reason: u ? 'wrong_password' : 'unknown_user', failed, locked: failed >= LOCK_AFTER };
   }
   await q.query('update users set failed_count=0, locked_until=null where username=$1', [u.username]);
   const token = crypto.randomBytes(32).toString('base64url');

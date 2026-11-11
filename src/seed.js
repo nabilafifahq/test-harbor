@@ -42,6 +42,11 @@ export function readInbox(dataDir) {
 }
 
 export async function seed(q, dataDir, password) {
+  // A reseed replaces the demo data, never the audit trail: earlier events move to audit_archive, which is not dropped.
+  await q.exec('create table if not exists audit_archive (id bigint, at timestamptz, actor text, actor_type text, email_id text, action text, detail jsonb, archived_at timestamptz not null default now())');
+  const archived = (await q.query("select to_regclass('audit_events') is not null as present")).rows[0].present
+    ? (await q.query('with moved as (insert into audit_archive (id, at, actor, actor_type, email_id, action, detail) select id, at, actor, actor_type, email_id, action, detail from audit_events returning 1) select count(*)::int as n from moved')).rows[0].n
+    : 0;
   await q.exec(TABLES.map((t) => `drop table if exists ${t} cascade;`).join('\n'));
   await q.exec(fs.readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
   const d = path.join(dataDir, 'erp');
@@ -56,8 +61,10 @@ export async function seed(q, dataDir, password) {
   await load(q, d, 'sales_order_lines.csv', 'sales_order_lines', ['so_number', 'line_no', 'sku', 'qty_ordered', 'qty_shipped', 'unit_price']);
   const emails = readInbox(dataDir).sort((a, b) => a.received_at.localeCompare(b.received_at));
   let n = 1001;
-  for (const e of emails) await q.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)', [e.email_id, `HP-${n++}`, e.received_at, e.from_name, e.from_email, e.subject, e.body, JSON.stringify(e.attachments || [])]);
+  for (const e of emails) await q.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)', [e.email_id, `HP-${n++}`, e.received_at, e.from_name, e.from_email, e.subject, e.body, JSON.stringify(e.attachments || []), e.message_id || null]);
+  await q.query("select setval('email_seq', count(*) + 1, false) from emails");
+  await q.query("select setval('so_number_seq', coalesce(max(substr(so_number, 4)::int), 0) + 1, false) from sales_orders");
   for (const u of DEMO_USERS) await q.query('insert into users (username, display_name, role, password_hash) values ($1,$2,$3,$4)', [u.username, u.display_name, u.role, await hashPassword(password)]);
-  await q.query("insert into audit_events (actor, actor_type, action, detail) values ('system','system','seeded',$1::jsonb)", [JSON.stringify({ emails: emails.length })]);
+  await q.query("insert into audit_events (actor, actor_type, action, detail) values ('system','system','seeded',$1::jsonb)", [JSON.stringify({ emails: emails.length, archived })]);
   return { emails: emails.length };
 }

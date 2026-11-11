@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "eval": "node scripts/eval.mjs",
-    "test": "node --test test/algo.test.mjs && node test/smoke.mjs && node --test test/agent-model.test.mjs"
+    "test": "node --test test/algo.test.mjs && node test/smoke.mjs && node --test test/agent-model.test.mjs && node --test test/audit.test.mjs && node --test test/concurrency.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.17",

@@ -7,7 +7,7 @@ Order intake for Harbor Point Supply Co., run by an agent and supervised by peop
 | Document control | |
 |---|---|
 | Document ID | HP-O2C-README |
-| Version | 1.1.1 |
+| Version | 1.2.0 |
 | Date | 11 November 2026 |
 | Owner | Nabila ([@nabilafifahq](https://github.com/nabilafifahq)) |
 | Status | Released |
@@ -91,7 +91,7 @@ With a model the inbox is queued and read in the background; the console shows p
 npm test
 ```
 
-Runs the unit tests for `src/algo.js`, the end-to-end smoke test (all 40 emails through the rules reader, then assertions on every safety rule and on the write path), and the model-agent tests with a scripted model in place of the real one (tool loop, draft validation, readers-agree check, fallback, queue, audit). No network is needed. Expected tail of the smoke test:
+Runs the unit tests for `src/algo.js`, the end-to-end smoke test (all 40 emails through the rules reader, then assertions on every safety rule and on the write path), the model-agent tests with a scripted model in place of the real one (tool loop, draft validation, readers-agree check, fallback, queue, audit), the audit-trail tests (sign-in events, refused requests, demo reset), and the concurrency tests. No network is needed. Two of the concurrency tests need a Postgres server and are skipped unless `TEST_DATABASE_URL` names a database they may wipe; CI runs them against Postgres 17. Expected tail of the smoke test:
 
 ```
 lane agreement with golden labels: 40/40
@@ -240,7 +240,7 @@ flowchart LR
 |---|---|
 | ERP snapshot | `customers`, `customer_contacts`, `ship_to_addresses`, `products`, `customer_prices`, `inventory`, `incoming_supply`, `sales_orders`, `sales_order_lines` |
 | Work | `emails`, `agent_reads` (the model's reading, tool trace, tokens and cost per email), `cases` (tickets: lane, status, priority, flags, checks, proposal, trace), `comments`, `outbox` |
-| Control | `audit_events`, `users`, `sessions`, `app_meta` |
+| Control | `audit_events`, `audit_archive` (audit rows from before each reseed), `users`, `sessions`, `app_meta` |
 
 ### 4.4 Key decisions
 
@@ -286,21 +286,21 @@ flowchart LR
 
 ### 6.2 Pipeline
 
-1. A push runs `.github/workflows/ci.yml`: install, unit tests, the 40-email smoke test, the model-agent tests, then a boot test against Postgres 17 that signs in and checks 40 tickets and zero unsafe automatic commits.
+1. A push runs `.github/workflows/ci.yml`: install, unit tests, the 40-email smoke test, the model-agent, audit and concurrency tests, the concurrency tests again against Postgres 17, then a boot test against Postgres 17 that signs in and checks 40 tickets and zero unsafe automatic commits.
 2. Vercel's Git integration builds the same commit: `public/` is served as static files, `api/index.js` becomes one serverless function (`vercel.json`). Branches named `eval/...` are not deployed.
 3. `.github/workflows/eval.yml` scores the real model on the 40 emails, by hand or on a push to `eval/...`.
 4. To stop a red commit from reaching production, protect `main` in GitHub (require the `ci` check) and merge through pull requests.
 
 ### 6.3 First run and reset
 
-The first request after a deploy creates the schema, loads the data and queues the inbox; the agent reads it in the background (about two minutes for 40 emails with the default model). A claim row in `app_meta` prevents two instances from seeding at the same time, and a lock row keeps decisions to one worker. An Admin can reset the demo to 07:00 from the account menu; everyone is signed out and the agent reads the inbox again.
+The first request after a deploy creates the schema, loads the data and queues the inbox; the agent reads it in the background (about two minutes for 40 emails with the default model). A claim row in `app_meta` prevents two instances from seeding at the same time, and a lock row keeps decisions to one worker. An Admin can reset the demo to 07:00 from the account menu; everyone is signed out and the agent reads the inbox again. The audit trail survives the reset: earlier rows move to `audit_archive`, and the reset is recorded as `demo_reset` with the Admin's name.
 
 ### 6.4 New mail and background work
 
 | Way in | How |
 |---|---|
-| Console | **New email**: type it or upload a `.eml` file |
-| Mail provider webhook | `POST /api/inbound` with `Authorization: Bearer $CRON_SECRET`, body `{"raw": "<the .eml text>"}` or `{"from_email", "from_name", "subject", "body"}` |
+| Console | **New email**: type it or upload a `.eml` file. A `.eml` already in the inbox (same `Message-ID`) is refused with the ticket it already has |
+| Mail provider webhook | `POST /api/inbound` with `Authorization: Bearer $CRON_SECRET`, body `{"raw": "<the .eml text>"}` or `{"from_email", "from_name", "subject", "body"}`. A repeat delivery of the same `Message-ID` returns the existing ticket and writes nothing |
 | Data folder | `.eml` files in `data/inbox/` are loaded at seed |
 
 Each new email is queued and a background run starts at once (`waitUntil`). A run reads with the model until it has less than 100 seconds left, then stops cleanly; with `CRON_SECRET` set it starts the next run itself. Vercel Cron calls `/api/agent/run` once a day as a backstop, and an open console restarts a stalled run within a minute. Nothing polls the database while the queue is empty, so the Neon compute can sleep.
@@ -312,7 +312,7 @@ Promote the previous production deployment in Vercel (Deployments, then Promote 
 ### 6.6 Observability
 
 - Every server error is logged with a short reference code that is also shown to the user.
-- `audit_events` records each model reading (model, tools called, tokens, cost, time), each fallback, each ticket, each human decision, each reviewer edit and each refused commit with its reasons.
+- `audit_events` records each model reading (model, tools called, tokens, cost, time), each fallback, each ticket, each human decision, each reviewer edit and each refused commit with its reasons, plus sign-ins, sign-outs, failed sign-ins, lockouts, refused requests (403) and demo resets. Every write per action is listed in [`docs/07-database-writes.md`](docs/07-database-writes.md).
 - Each ticket keeps the full tool trace (inputs and outputs), shown on the ticket page.
 - `GET /api/status` needs no sign-in and returns counts only: reader mode, queue progress, routing against the labels, model calls and cost.
 - `GET /api/health` returns `{"ok":true}` without touching the database, for uptime checks.
@@ -380,7 +380,7 @@ src/
   server.js             local server
 public/                 console (HTML, CSS, JS, fonts, icons)
 data/                   ERP snapshot, inbox/*.eml (40 emails), golden labels
-test/                   unit, smoke and model-agent tests; fake-model.mjs for local runs without a key
+test/                   unit, smoke, model-agent, audit and concurrency tests; fake-model.mjs for local runs without a key
 scripts/eval.mjs        scores the model on the 40 emails
 scripts/db-writes.mjs   traces which tables each user action writes (docs/07)
 docs/                   submission documents
@@ -436,3 +436,4 @@ The demo is hosted on Vercel. For production use:
 | 1.0.0 | 6 November 2026 | First release: agent pipeline, review console, roles, audit, Vercel deployment |
 | 1.1.0 | 7 November 2026 | Model agent with tool calling (DeepInfra), readers-agree check, background queue, `.eml` ingest and inbound webhook, reviewer edits of items and delivery address, model eval in CI |
 | 1.1.1 | 11 November 2026 | Architecture and scaling document, database writes per action, PDF builder source; no code change |
+| 1.2.0 | 11 November 2026 | Audit trail survives a demo reset (`audit_archive`); failed sign-ins, lockouts, sign-outs, refused requests (403) and repeat deliveries are audited; setting the current status again writes nothing; email and SO numbers from sequences; stock rows locked in SKU order; `Message-ID` deduplication; concurrency tests against Postgres 17 in CI. The seed version moves to v4, so the first request after deploy reseeds once |

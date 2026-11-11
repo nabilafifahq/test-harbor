@@ -3,7 +3,7 @@
 | Document control | |
 |---|---|
 | Document ID | HP-O2C-ARC-001 |
-| Version | 1.0, 11 November 2026 |
+| Version | 1.1, 11 November 2026 |
 | Owner | Nabila |
 | Status | Draft for review |
 | Related | README section 4 (summary architecture), `docs/07-database-writes.md` (writes per action) |
@@ -166,7 +166,7 @@ Making each part bigger. This is the first move for every layer because it chang
 
 ### 3.3 Horizontal scaling
 
-Adding more copies. The web tier and model reading scale out today. Decisions stay on one worker until section 3.4 row 6 is done, and concurrent requests need rows 1 to 3 first.
+Adding more copies. The web tier and model reading scale out today, and concurrent new mail and approvals are safe since rows 1 to 3 of section 3.4 were fixed. Decisions stay on one worker until row 6 is done.
 
 | Layer | How it scales out | Ready today? |
 |---|---|---|
@@ -195,13 +195,13 @@ flowchart LR
 
 ### 3.4 What breaks first, and the change for each
 
-Found by reading the code against higher volume. None affects correctness at today's load; rows 1 to 3 can fail requests under concurrency and should be fixed before real traffic.
+Found by reading the code against higher volume. None affects correctness at today's load. Rows 1 to 3 failed requests that arrived at the same moment; they were fixed on 11 November 2026, and `test/concurrency.test.mjs` runs each race against Postgres 17 in CI. Before the fix, eight new emails at once failed with a duplicate email ID, two approvals at once with a duplicate SO number, and two approvals sharing SKUs in opposite order with a deadlock.
 
 | # | Where | Today | What breaks | Change |
 |---|---|---|---|---|
-| 1 | Email ID (`ingest` in `src/app.js`) | `E` + count of emails + 1 | Two emails arriving at the same moment get the same ID; one insert fails | Identity column or UUID; unique index on the mail `Message-ID` so a webhook retry does not create a second ticket |
-| 2 | SO number (`commitProposal`) | Highest SO number + 1, read inside the transaction | Two approvals for different customers at the same moment pick the same number; one rolls back and the reviewer sees an error | A Postgres sequence |
-| 3 | Stock row locks (`commitProposal`) | Locked line by line in the order of the draft | Two approvals that share SKUs in different order can deadlock; Postgres aborts one | Lock all inventory rows of the commit in sorted SKU order first |
+| 1 | Email ID (`ingest` in `src/app.js`) | Fixed: number from the sequence `email_seq` (was count of emails + 1); `Message-ID` stored with a unique index, so a repeat delivery returns the existing ticket | Nothing at volume | Done |
+| 2 | SO number (`commitProposal`) | Fixed: number from the sequence `so_number_seq` (was highest SO number + 1) | Nothing at volume. A commit refused by the credit check after it took a number leaves a gap in the SO numbers | Done |
+| 3 | Stock row locks (`commitProposal`) | Fixed: every inventory row of the commit locked first, in SKU order (was line by line in the order of the draft) | Nothing at volume. Two commits that share SKUs run one after the other | Done |
 | 4 | Ticket list (`listTickets`) | Loads every ticket, with the email body, on each request; filters, search and counts in memory | Response time grows with every ticket ever received | Filters, sort and keyset pagination in SQL; Postgres full-text search (`tsvector` with a GIN index) or `pg_trgm`; counts by `GROUP BY`; closed tickets out of the default query |
 | 5 | Model waves (`runAgentQueue`) | Claims 8, waits for all 8, claims the next 8 | A wave waits for its slowest email (55 s against a 14 s average) | Continuous worker pool: claim the next email as soon as one finishes. *Derived:* close to twice the throughput at the same concurrency |
 | 6 | Decision lock | One worker for all customers | Becomes the limit only at very high volume (decision step is milliseconds) | Lock per customer: credit and duplicate POs depend only on the same customer; stock is already protected by row locks in the commit |
@@ -217,7 +217,7 @@ Each stage starts when its signal appears.
 | Stage | Load it is built for | Platform | Code changes |
 |---|---|---|---|
 | 0, today | One inbox, 40 emails a day, a demo | Vercel Hobby, Neon Free, DeepInfra default limits | None |
-| 1, first real team | One company's order desk; paying use | Vercel Pro (Hobby forbids commercial use), Neon Launch, cron every minute | Rows 1 to 3, 9 and 10 of section 3.4; direct mailbox connection; single sign-on |
+| 1, first real team | One company's order desk; paying use | Vercel Pro (Hobby forbids commercial use), Neon Launch, cron every minute | Rows 9 and 10 of section 3.4; direct mailbox connection; single sign-on |
 | 2, more volume | Backlog at peak hours, list pages slowing | Worker process on a container platform or VPS next to the web tier; read replica for dashboards | Rows 4, 5, 7 and 8; queue depth and age alerts; dead-letter view |
 | 3, several companies | More than one customer of the product | Tenant ID on every row with Postgres row-level security, or one Neon project per tenant | Per-tenant queues and model budgets; row 6 |
 
@@ -266,7 +266,7 @@ The ten read-only tools in `src/model-agent.js` (customer, ship-to, catalog sear
 
 **How does it scale horizontally?** Model reads already scale out: any number of runs can claim different emails safely. The web tier scales by request. Decisions run one at a time on purpose; they take milliseconds, and when they become the limit they can be split by customer.
 
-**What breaks first at ten times the load?** Concurrent requests, before raw volume: duplicate email IDs, duplicate SO numbers, and lock order in the commit (section 3.4, rows 1 to 3). They fail safely: a request errors and nothing wrong is written, but the reviewer or the mail provider has to retry. Then the ticket list, which reads every ticket on each request.
+**What breaks first at ten times the load?** The ticket list, which reads every ticket on each request (section 3.4, row 4). Three races used to fail requests that arrived together: duplicate email IDs, duplicate SO numbers, and lock order in the commit. They never wrote anything wrong, and they were fixed on 11 November 2026 with two sequences and sorted stock locks, each race tested against Postgres 17 in CI.
 
 **What if the model provider is slow, down or rate-limited?** The client retries once on 429 and 5xx. A failed reading is retried once more, then the rules reader takes over and the ticket waits for a person; nothing is written automatically without the model. A second model in `LLM_MODEL` is tried before the rules reader.
 
