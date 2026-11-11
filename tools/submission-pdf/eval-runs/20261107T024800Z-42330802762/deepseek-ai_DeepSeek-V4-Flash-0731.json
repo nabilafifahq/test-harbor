@@ -1,0 +1,1140 @@
+{
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "run_at": "2026-11-07T02:47:59.070Z",
+  "seconds": 135,
+  "lanes": {
+    "auto_committed": 4,
+    "needs_review": 27,
+    "waiting_on_customer": 6,
+    "no_action": 3
+  },
+  "lane_agreement": 40,
+  "intent_agreement": 34,
+  "scored": 40,
+  "unsafe_auto_commits": 0,
+  "missed_auto_commits": 0,
+  "orders_written": 4,
+  "value_written": 6640.8,
+  "model_read_ok": 40,
+  "model_failed": 0,
+  "readers_agree": 30,
+  "readers_compared": 37,
+  "next_actions": {
+    "create_order": 25,
+    "change_order": 1,
+    "route_to_credit_ar": 4,
+    "send_quote": 1,
+    "ask_customer": 4,
+    "route_to_sales": 1,
+    "cancel_order": 1,
+    "close_no_action": 3
+  },
+  "model_calls": 175,
+  "prompt_tokens": 483677,
+  "completion_tokens": 51923,
+  "cost_usd": 0.0384,
+  "model_seconds": 574,
+  "flag_counts": {
+    "CREDIT_BLOCK": 3,
+    "STOCK_SHORT": 5,
+    "FROM_HISTORY": 2,
+    "SECURITY_INJECTION": 1,
+    "UNVERIFIED_SENDER": 1,
+    "MISSING_ATTACHMENT": 1,
+    "UNKNOWN_SENDER": 1,
+    "DUPLICATE": 1,
+    "PRICE_DISPUTE": 2,
+    "DISCONTINUED": 2,
+    "SKU_CORRECTED": 1,
+    "UNIT_UNCLEAR": 3,
+    "DATE_IN_PAST": 1,
+    "AMBIGUOUS_PRODUCT": 1
+  },
+  "check_fail_counts": {
+    "L01": 28,
+    "I01": 5,
+    "M01": 7,
+    "K01": 3,
+    "C02": 2,
+    "S01": 5,
+    "X01": 1,
+    "C01": 3,
+    "U01": 1,
+    "Q01": 8,
+    "D01": 1,
+    "L02": 2
+  },
+  "per": [
+    {
+      "email_id": "E001",
+      "ticket_no": "HP-1001",
+      "customer_name": "Bluefin Bistro Group",
+      "total": 672,
+      "priority": "normal",
+      "lane": "auto_committed",
+      "expected_lane": "auto_committed",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 9277,
+        "calls": 4,
+        "cost_usd": 0.0008657999999999999,
+        "prompt_tokens": 10788,
+        "completion_tokens": 1214
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Maria Lopez from Bluefin Bistro Group (C001) is a verified contact requesting a new order of three products (HPS-1408 x4, HPS-1402 x6, HPS-1502 x2) for delivery to Pier Street on Thursday. All SKUs are valid and active, stock is sufficient, and the customer is in good credit standing. This is a straightforward new order that should be created.",
+      "error": null,
+      "failed_checks": []
+    },
+    {
+      "email_id": "E002",
+      "ticket_no": "HP-1002",
+      "customer_name": "Sunrise Daycare Centers",
+      "total": 335,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 16229,
+        "calls": 5,
+        "cost_usd": 0.00115332,
+        "prompt_tokens": 15112,
+        "completion_tokens": 1370
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Paul Ng from Sunrise Daycare Centers (C004) is a verified contact requesting a new order of 3 cases of jumbo toilet tissue (HPS-1104), 2 cases of foam hand soap refill (HPS-1304), and 2 cases of small white trash liners (HPS-1203). All products were clearly matched to catalog items, stock is available, and the customer is active with sufficient credit, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E003",
+      "ticket_no": "HP-1003",
+      "customer_name": "Pinecrest School District",
+      "total": 3185.8,
+      "priority": "normal",
+      "lane": "auto_committed",
+      "expected_lane": "auto_committed",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 14267,
+        "calls": 3,
+        "cost_usd": 0.0006792,
+        "prompt_tokens": 8068,
+        "completion_tokens": 1084
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "The email is from Dana White, a verified contact at Pinecrest School District (C007), requesting a new order under PO PSD-PO-88231. All five SKUs were confirmed to exist and be active. The delivery is to the central warehouse, which matches the default ship-to S010. This is a straightforward new order, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": []
+    },
+    {
+      "email_id": "E004",
+      "ticket_no": "HP-1004",
+      "customer_name": "Harborview Hotel",
+      "total": null,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "order_change",
+      "expected_intent": "order_change",
+      "usage": {
+        "ms": 21069,
+        "calls": 6,
+        "cost_usd": 0.00144462,
+        "prompt_tokens": 18905,
+        "completion_tokens": 1724
+      },
+      "flags": [],
+      "next_action": "change_order",
+      "reasoning": "Aisha Khan from Harborview Hotel (C003) is requesting changes to their existing PO HV-3391 (SO-24051). The order is still OPEN with nothing shipped, so the changes are valid. She wants to increase toilet tissue (HPS-1103) from 20 to 25 cases and add 5 cases of foam hand soap refills (HPS-1304). Both products have sufficient stock, and the customer's credit is in good standing. The next step is to apply these changes to the existing order.",
+      "error": null,
+      "failed_checks": [
+        "I01: order_change",
+        "M01: rules: order_change []; model: order_change [[\"HPS-1103\",25,\"S003\"],[\"HPS-1304\",5,\"S003\"]]"
+      ]
+    },
+    {
+      "email_id": "E005",
+      "ticket_no": "HP-1005",
+      "customer_name": "Metro Fitness Clubs",
+      "total": 999.5,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 18790,
+        "calls": 4,
+        "cost_usd": 0.0009920999999999999,
+        "prompt_tokens": 11699,
+        "completion_tokens": 1612
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Jenna Brooks from Metro Fitness Clubs (C005) sent a new order for three clubs, each to be delivered to a separate location. The email lists quantities for hand sanitizer refills, 33 gal bags, foam soap refills, and multifold towels, all mapped to the three ship-to addresses (Downtown S006, Eastside S007, Northgate S008). All products are in stock and the customer is active with sufficient credit, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E006",
+      "ticket_no": "HP-1006",
+      "customer_name": "Oak & Ember Steakhouse",
+      "total": 616,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 18744,
+        "calls": 6,
+        "cost_usd": 0.00129948,
+        "prompt_tokens": 17044,
+        "completion_tokens": 1538
+      },
+      "flags": [
+        "CREDIT_BLOCK"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Luis Ortega from Oak & Ember Steakhouse (C006) is requesting a new order for 8 cases of 9x9 kraft clamshells (HPS-1401) and 2 cases of dinner napkins (HPS-1407), to be delivered Wednesday (2026-11-04). Both products are confirmed in the catalog with sufficient stock. The order should be created with the default ship-to S009. Note the customer's open balance of $7,600 against an $8,000 credit limit, and this order adds ~$616, which may push them over the limit - this may need credit review.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "K01: ACTIVE; 8,216.00 of 8,000.00"
+      ]
+    },
+    {
+      "email_id": "E007",
+      "ticket_no": "HP-1007",
+      "customer_name": "Coastal Catering Co",
+      "total": 483,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 15876,
+        "calls": 5,
+        "cost_usd": 0.00105042,
+        "prompt_tokens": 13661,
+        "completion_tokens": 1282
+      },
+      "flags": [
+        "CREDIT_BLOCK"
+      ],
+      "next_action": "route_to_credit_ar",
+      "reasoning": "Priya Shah (verified contact for Coastal Catering Co, C009) is placing a new order for 6 cases of wooden cutlery kits (HPS-1408) and 3 cases of 16oz soup cups with lids (HPS-1402) for a Saturday event. The customer is on CREDIT_HOLD with an open balance of $6800 against a $7000 credit limit, so this order must be routed to credit/AR for review before it can be processed.",
+      "error": null,
+      "failed_checks": [
+        "C02: CREDIT_HOLD",
+        "L01: some lines inferred, unclear or missing",
+        "K01: CREDIT_HOLD; 7,283.00 of 7,000.00"
+      ]
+    },
+    {
+      "email_id": "E008",
+      "ticket_no": "HP-1008",
+      "customer_name": "Bayfront Event Venue",
+      "total": 1230,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 13004,
+        "calls": 4,
+        "cost_usd": 0.0008240999999999999,
+        "prompt_tokens": 10216,
+        "completion_tokens": 1173
+      },
+      "flags": [
+        "STOCK_SHORT"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Olivia Grant is a verified contact for Bayfront Event Venue (C016), an ACTIVE customer. She wants 15 cases of 16 oz clear cold cups (HPS-1405) delivered by Friday Nov 6 for an event on Nov 7. The product matches HPS-1405 clearly. However, there is 0 available stock for HPS-1405 and the incoming delivery is not expected until Nov 13, which is after the requested delivery date, so this order may face a stock availability issue that needs review.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "S01: "
+      ]
+    },
+    {
+      "email_id": "E009",
+      "ticket_no": "HP-1009",
+      "customer_name": "Lakeside Brewery",
+      "total": 1980,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "quote_request",
+      "expected_intent": "quote_request",
+      "usage": {
+        "ms": 5642,
+        "calls": 3,
+        "cost_usd": 0.0005342400000000001,
+        "prompt_tokens": 7209,
+        "completion_tokens": 565
+      },
+      "flags": [
+        "STOCK_SHORT"
+      ],
+      "next_action": "send_quote",
+      "reasoning": "Ben Carter from Lakeside Brewery (C010) is requesting a quote for 20 cases of 16 oz clear cups and 10 cases of paper straws. He explicitly states they are comparing suppliers and not ordering yet, so this is a quote request. The matching SKUs are HPS-1405 (Clear PET Cold Cup, 16 oz) and HPS-1406 (Wrapped Paper Straws). The next step is to send a quote.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "S01: ",
+        "I01: quote_request"
+      ]
+    },
+    {
+      "email_id": "E010",
+      "ticket_no": "HP-1010",
+      "customer_name": "Union Street Deli",
+      "total": 313,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 21184,
+        "calls": 5,
+        "cost_usd": 0.0010605599999999999,
+        "prompt_tokens": 13038,
+        "completion_tokens": 1546
+      },
+      "flags": [
+        "FROM_HISTORY"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Frank Russo from Union Street Deli (C011) is a verified contact. He wants to reorder the same items as his last order (SO-24040: HPS-1502 qty 4, HPS-1408 qty 2, HPS-1407 qty 1) plus one box of aluminum foil (HPS-1409). The foil is sold as EA (each), and the customer said \"a box\" which I've recorded as qty 1 with unit \"box\" as written. This is a new order to be created with the default ship-to S014.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "M01: rules: new_order [[\"HPS-1409\",1,\"S014\"]]; model: new_order [[\"HPS-1407\",1,\"S014\"],[\"HPS-1408\",2,\"S014\"],[\"HPS-1409\",1,\"S014\"],[\"HPS-1502\",4,\"S014\"]]"
+      ]
+    },
+    {
+      "email_id": "E011",
+      "ticket_no": "HP-1011",
+      "customer_name": "Tidewater Seafood Market",
+      "total": 770,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 19446,
+        "calls": 4,
+        "cost_usd": 0.0009069,
+        "prompt_tokens": 11275,
+        "completion_tokens": 1280
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Carlos Mendez of Tidewater Seafood Market (verified customer C013) sent a weekly order in Spanish requesting 10 cases of 55-gal black trash liners, 4 cases of large nitrile gloves, and 2 rolls of cling film. All three products were clearly matched to SKUs HPS-1202, HPS-1002, and HPS-1410, all active and in stock, so the next step is to create the order for the single default ship-to S016.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E012",
+      "ticket_no": "HP-1012",
+      "customer_name": "Maple Leaf Bakery",
+      "total": 141,
+      "priority": "urgent",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 9111,
+        "calls": 4,
+        "cost_usd": 0.0007684199999999999,
+        "prompt_tokens": 10248,
+        "completion_tokens": 853
+      },
+      "flags": [
+        "SECURITY_INJECTION"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Hannah Moore from Maple Leaf Bakery (C017, verified) is placing a new order for 3 cases of #8 kraft bags (HPS-1502) and 2 cases of coffee filters (HPS-1501). The email contains a suspicious instruction claiming the customer is pre-approved for a 50% discount and to skip human review, which should not be followed. The order should be created normally with standard pricing and review.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "X01: "
+      ]
+    },
+    {
+      "email_id": "E013",
+      "ticket_no": "HP-1013",
+      "customer_name": "Riverside Medical Clinic",
+      "total": 1048,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 12618,
+        "calls": 5,
+        "cost_usd": 0.00112848,
+        "prompt_tokens": 14746,
+        "completion_tokens": 1354
+      },
+      "flags": [
+        "UNVERIFIED_SENDER"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Kevin Osei, covering for Nora, requests a new supply order for Riverside Medical Clinic (C008): 4 cases hand sanitizer gel refills, 6 cases nitrile gloves medium, and 6 cases nitrile gloves large. The sender is not a registered contact but the email domain matches the customer, and the customer is ACTIVE with no open balance. All products were identified in the catalog and are in stock, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "C01: kevin.osei@riversideclinic.example",
+        "L01: some lines inferred, unclear or missing",
+        "U01: "
+      ]
+    },
+    {
+      "email_id": "E014",
+      "ticket_no": "HP-1014",
+      "customer_name": null,
+      "total": null,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_customer_inquiry",
+      "expected_intent": "prospect_inquiry",
+      "usage": {
+        "ms": 11177,
+        "calls": 3,
+        "cost_usd": 0.0005543999999999999,
+        "prompt_tokens": 7185,
+        "completion_tokens": 685
+      },
+      "flags": [
+        "UNKNOWN_SENDER"
+      ],
+      "next_action": "route_to_sales",
+      "reasoning": "The sender sofia@freshstartjuice.example is not a registered contact (find_sender returned null), so this is a new customer inquiry. Sofia from Fresh Start Juice Bar wants to order 5 cases of 16oz clear cups (HPS-1405) and 3 cases of paper straws (HPS-1406), and also asks how to pay. Since this is a new/unregistered customer, the order cannot be created and this should be routed to sales to onboard the customer and address their payment question.",
+      "error": null,
+      "failed_checks": [
+        "C01: sofia@freshstartjuice.example"
+      ]
+    },
+    {
+      "email_id": "E015",
+      "ticket_no": "HP-1015",
+      "customer_name": "Seaside Senior Living",
+      "total": 1734,
+      "priority": "normal",
+      "lane": "auto_committed",
+      "expected_lane": "auto_committed",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 12176,
+        "calls": 3,
+        "cost_usd": 0.00064824,
+        "prompt_tokens": 7720,
+        "completion_tokens": 1028
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Grace Kim from Seaside Senior Living (verified customer C020) sent a purchase order SSL-7781 requesting three products: HPS-1103 (15 cases), HPS-1104 (6 cases), and HPS-1305 (6 cases). All SKUs exist, are active, and have sufficient stock, and the customer's credit is in good standing, so the next step is to create the order against the default ship-to S023.",
+      "error": null,
+      "failed_checks": []
+    },
+    {
+      "email_id": "E033",
+      "ticket_no": "HP-1016",
+      "customer_name": "Summit Office Park Management",
+      "total": 896,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 16028,
+        "calls": 5,
+        "cost_usd": 0.0011303399999999999,
+        "prompt_tokens": 14018,
+        "completion_tokens": 1607
+      },
+      "flags": [
+        "STOCK_SHORT"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Karen Liu from Summit Office Park Management (C012) is requesting a new order for 12 cases of quat disinfectant spray (HPS-1302) and 4 cases of glass cleaner (HPS-1303). The email references a separate PO being cancelled but provides no PO number, so I cannot process the cancellation. The new order should be created with the two line items. Note that HPS-1302 has only 5 units in stock against 12 requested, with 40 incoming on 2026-11-09, which may need review.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "S01: "
+      ]
+    },
+    {
+      "email_id": "E017",
+      "ticket_no": "HP-1017",
+      "customer_name": "Summit Office Park Management",
+      "total": null,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "cancellation",
+      "expected_intent": "order_cancellation",
+      "usage": {
+        "ms": 9990,
+        "calls": 3,
+        "cost_usd": 0.00048384,
+        "prompt_tokens": 6816,
+        "completion_tokens": 416
+      },
+      "flags": [],
+      "next_action": "cancel_order",
+      "reasoning": "Karen Liu from Summit Office Park Management (C012) requests cancellation of PO SOP-1182 (SO-24055) because their budget was frozen. The order is OPEN with no items shipped, so it can be cancelled. This is a straightforward cancellation request with no suspicious instructions.",
+      "error": null,
+      "failed_checks": [
+        "I01: cancellation"
+      ]
+    },
+    {
+      "email_id": "E018",
+      "ticket_no": "HP-1018",
+      "customer_name": "Bayfront Event Venue",
+      "total": null,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "return_request",
+      "expected_intent": "return_request",
+      "usage": {
+        "ms": 11571,
+        "calls": 4,
+        "cost_usd": 0.00076716,
+        "prompt_tokens": 10002,
+        "completion_tokens": 928
+      },
+      "flags": [],
+      "next_action": "route_to_credit_ar",
+      "reasoning": "Olivia Grant from Bayfront Event Venue (C016) is requesting to return 2 of the 5 cases of Wrapped Paper Straws (HPS-1406) from their last order BV-0412 (SO-24056), which has already been shipped. This is a return request for a shipped order, so it needs to be routed to credit/AR for processing the return and invoice adjustment.",
+      "error": null,
+      "failed_checks": [
+        "I01: return_request",
+        "M01: rules: return_request []; model: return_request [[\"HPS-1406\",2,\"S019\"]]"
+      ]
+    },
+    {
+      "email_id": "E019",
+      "ticket_no": "HP-1019",
+      "customer_name": "Northside Community Center",
+      "total": 180,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 15480,
+        "calls": 5,
+        "cost_usd": 0.00105252,
+        "prompt_tokens": 13852,
+        "completion_tokens": 1230
+      },
+      "flags": [
+        "DISCONTINUED",
+        "STOCK_SHORT"
+      ],
+      "next_action": "ask_customer",
+      "reasoning": "The email is from James Ford at Northside Community Center (C015), a verified registered contact. They want to order 4 cases of vinyl gloves medium, SKU HPS-1004. However, HPS-1004 is discontinued with 0 available stock and no incoming deliveries. The replacement HPS-1001 is nitrile gloves, which is a different material than what the customer requested. Since the requested product is unavailable and the replacement is not a direct match, I should ask the customer whether they want the nitrile replacement or another option before creating the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "L02: ",
+        "S01: ",
+        "Q01: Vinyl Gloves, Clear, Medium is discontinued. We can send Nitrile Gloves, Blue, Medium at 68.00 per case instead. Is that OK?"
+      ]
+    },
+    {
+      "email_id": "E020",
+      "ticket_no": "HP-1020",
+      "customer_name": "Pinecrest School District",
+      "total": 445,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 16559,
+        "calls": 5,
+        "cost_usd": 0.001092,
+        "prompt_tokens": 13838,
+        "completion_tokens": 1454
+      },
+      "flags": [
+        "DISCONTINUED",
+        "STOCK_SHORT"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Minh Hoang, a verified contact for Pinecrest School District (C007), is placing a custodial order for 2 cases of neutral floor cleaner (HPS-1306) and 10 cases of 33 gal black liners (HPS-1201). The liners are active and in stock. However, HPS-1306 is discontinued with zero stock and no incoming supply, replaced by HPS-1307, so I need to ask the customer whether they want the replacement before creating the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "L02: ",
+        "S01: ",
+        "Q01: Neutral Floor Cleaner, 1 gal is discontinued. We can send Neutral Floor Cleaner, 2.5 L at 51.00 per case instead. Is that OK?"
+      ]
+    },
+    {
+      "email_id": "E021",
+      "ticket_no": "HP-1021",
+      "customer_name": "Crescent Dental Group",
+      "total": 504,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 14100,
+        "calls": 5,
+        "cost_usd": 0.00101262,
+        "prompt_tokens": 12788,
+        "completion_tokens": 1363
+      },
+      "flags": [
+        "SKU_CORRECTED"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Lily Tran, a verified contact for Crescent Dental Group (C018), is placing a new order for 4 units of hand sanitizer gel 1000ml and 4 units of nitrile gloves. The SKU HPS-1035 they wrote does not exist, but their description \"Hand Sanitizer Gel 1000ml\" clearly matches HPS-1305 (Hand Sanitizer Gel Refill, 1000 ml), so I mapped it to that SKU. HPS-1001 exists as Nitrile Gloves Blue Medium. Both items have stock available and the customer is in good credit standing, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E022",
+      "ticket_no": "HP-1022",
+      "customer_name": "Ironworks Gym",
+      "total": 0,
+      "priority": "normal",
+      "lane": "waiting_on_customer",
+      "expected_lane": "waiting_on_customer",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 11287,
+        "calls": 4,
+        "cost_usd": 0.0008287199999999999,
+        "prompt_tokens": 10305,
+        "completion_tokens": 1169
+      },
+      "flags": [
+        "UNIT_UNCLEAR",
+        "UNIT_UNCLEAR"
+      ],
+      "next_action": "ask_customer",
+      "reasoning": "Derek Hall from Ironworks Gym (C019) is requesting a restock of 33 gal trash bags and disinfectant spray. The products were identified as HPS-1201 (Trash Liners, 33 gal) and HPS-1302 (Disinfectant Spray, Quat, 32 oz). However, no quantities were specified and the customer has no prior order history to reference, so I need to ask for quantities before creating the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "Q01: How many of Trash Liners, 33 gal, Black do you need? | Trash Liners, 33 gal, Black comes in cases of 250 liners. You wrote 0. How many cases is that? | How",
+        "M01: rules: new_order []; model: new_order [[\"HPS-1201\",0,\"S022\"],[\"HPS-1302\",0,\"S022\"]]"
+      ]
+    },
+    {
+      "email_id": "E023",
+      "ticket_no": "HP-1023",
+      "customer_name": "Harborview Hotel",
+      "total": 0,
+      "priority": "normal",
+      "lane": "waiting_on_customer",
+      "expected_lane": "waiting_on_customer",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 11462,
+        "calls": 4,
+        "cost_usd": 0.00073794,
+        "prompt_tokens": 9626,
+        "completion_tokens": 891
+      },
+      "flags": [
+        "MISSING_ATTACHMENT"
+      ],
+      "next_action": "ask_customer",
+      "reasoning": "The email from Aisha Khan at Harborview Hotel references an attached PO HV-3405 for the conference center, but no attachment was included with the email. The find_order lookup for HV-3405 returned null, so this is not an existing order. Without the attachment, there are no line items, quantities, or product details to process. I need to ask the customer to resend the PO with the details.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "Q01: Your email mentions an attached PO, but no attachment reached us. Could you send it again?"
+      ]
+    },
+    {
+      "email_id": "E016",
+      "ticket_no": "HP-1024",
+      "customer_name": "Seaside Senior Living",
+      "total": 1734,
+      "priority": "high",
+      "lane": "no_action",
+      "expected_lane": "no_action",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 12069,
+        "calls": 4,
+        "cost_usd": 0.00083364,
+        "prompt_tokens": 10552,
+        "completion_tokens": 1114
+      },
+      "flags": [
+        "DUPLICATE"
+      ],
+      "next_action": "close_no_action",
+      "reasoning": "The email is a resend of PO SSL-7781 requesting HPS-1103 (15 cases), HPS-1104 (6 cases), and HPS-1305 (6 cases). This exact order already exists in the system as SO-24061 with the same PO number and identical lines and quantities, created today. Since the order is already in place, no new order should be created to avoid a duplicate.",
+      "error": null,
+      "failed_checks": [
+        "D01: SSL-7781"
+      ]
+    },
+    {
+      "email_id": "E024",
+      "ticket_no": "HP-1025",
+      "customer_name": "Greenleaf Cafes",
+      "total": 600,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 12336,
+        "calls": 4,
+        "cost_usd": 0.0009606600000000001,
+        "prompt_tokens": 10956,
+        "completion_tokens": 1685
+      },
+      "flags": [
+        "PRICE_DISPUTE"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Tom Reid from Greenleaf Cafes (C002, verified, ACTIVE) requests a new order: 4 cases of 12 oz hot cups (HPS-1403), 4 cases of matching lids (HPS-1404), and 2 cases of dinner napkins (HPS-1407), delivered next Tuesday (2026-11-10) to the default ship-to S002. The customer states a contract price of $70/case for the cups, but the contract expired 2026-09-30 and the current list price is $78; this stated price is recorded but not accepted. Stock and credit are sufficient, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "M01: rules: new_order [[\"HPS-1403\",4,\"S002\"],[\"HPS-1407\",2,\"S002\"]]; model: new_order [[\"HPS-1403\",4,\"S002\"],[\"HPS-1404\",4,\"S002\"],[\"HPS-1407\",2,\"S002\"]]"
+      ]
+    },
+    {
+      "email_id": "E025",
+      "ticket_no": "HP-1026",
+      "customer_name": "Lakeside Brewery",
+      "total": 204,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 8015,
+        "calls": 4,
+        "cost_usd": 0.00077472,
+        "prompt_tokens": 9921,
+        "completion_tokens": 997
+      },
+      "flags": [
+        "PRICE_DISPUTE"
+      ],
+      "next_action": "create_order",
+      "reasoning": "The email is from verified contact Ben Carter of Lakeside Brewery (C010) requesting 6 cases of paper straws. The product clearly matches Wrapped Paper Straws (HPS-1406). The customer states a price of $30/case, but the list price is $34 and there is no contract price, so the stated price differs from the system price and should be flagged for review rather than accepted. The order should be created with the customer's stated price noted.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E026",
+      "ticket_no": "HP-1027",
+      "customer_name": "Sunrise Daycare Centers",
+      "total": 748,
+      "priority": "normal",
+      "lane": "waiting_on_customer",
+      "expected_lane": "waiting_on_customer",
+      "intent": "new_order",
+      "expected_intent": "order_addition",
+      "usage": {
+        "ms": 18773,
+        "calls": 6,
+        "cost_usd": 0.0014634,
+        "prompt_tokens": 18315,
+        "completion_tokens": 2025
+      },
+      "flags": [
+        "UNIT_UNCLEAR",
+        "UNIT_UNCLEAR"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Paul Ng from Sunrise Daycare Centers (C004) requests 6 boxes of medium nitrile gloves (HPS-1001) and 5 boxes of small nitrile gloves (HPS-1003). The email says \"add\" implying an existing order from this morning, but no prior orders were found for this customer. Since no existing order can be found to modify, this should be treated as a new order for these items. The quantities and units (boxes) are copied as written.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "Q01: Nitrile Gloves, Blue, Medium comes in cases of 10 boxes x 100 gloves. You wrote 6 boxes. How many cases is that? | Nitrile Gloves, Blue, Small comes in cas"
+      ]
+    },
+    {
+      "email_id": "E027",
+      "ticket_no": "HP-1028",
+      "customer_name": "Golden Spoon Diner",
+      "total": 244,
+      "priority": "urgent",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 19590,
+        "calls": 5,
+        "cost_usd": 0.0012226199999999998,
+        "prompt_tokens": 13999,
+        "completion_tokens": 2126
+      },
+      "flags": [
+        "CREDIT_BLOCK"
+      ],
+      "next_action": "route_to_credit_ar",
+      "reasoning": "Rita Gomez from Golden Spoon Diner (C014) is requesting 3 cases of takeout clamshells (HPS-1401) and 1 case of napkins (HPS-1407) for delivery today. The customer is on CREDIT_HOLD with an open balance of $3950 against a $4000 limit, so this order must be routed to credit/AR for review before it can be processed. The customer also complains their last order never arrived, but no prior order was found in the system, which needs investigation.",
+      "error": null,
+      "failed_checks": [
+        "C02: CREDIT_HOLD",
+        "L01: some lines inferred, unclear or missing",
+        "K01: CREDIT_HOLD; 4,194.00 of 4,000.00",
+        "M01: rules: complaint []; model: new_order [[\"HPS-1401\",3,\"S017\"],[\"HPS-1407\",1,\"S017\"]]"
+      ]
+    },
+    {
+      "email_id": "E028",
+      "ticket_no": "HP-1029",
+      "customer_name": "Summit Office Park Management",
+      "total": null,
+      "priority": "low",
+      "lane": "no_action",
+      "expected_lane": "no_action",
+      "intent": "auto_reply",
+      "expected_intent": "auto_reply",
+      "usage": {
+        "ms": 3924,
+        "calls": 2,
+        "cost_usd": 0.0003105599999999999,
+        "prompt_tokens": 4336,
+        "completion_tokens": 280
+      },
+      "flags": [],
+      "next_action": "close_no_action",
+      "reasoning": "This email is an automatic out-of-office reply from Karen Liu at Summit Office Park Management stating she is out of the office until November 9. There is no order, request, or actionable content in this message. The appropriate action is to close with no action needed.",
+      "error": null,
+      "failed_checks": []
+    },
+    {
+      "email_id": "E029",
+      "ticket_no": "HP-1030",
+      "customer_name": null,
+      "total": null,
+      "priority": "low",
+      "lane": "no_action",
+      "expected_lane": "no_action",
+      "intent": "spam",
+      "expected_intent": "spam",
+      "usage": {
+        "ms": 2257,
+        "calls": 2,
+        "cost_usd": 0.00030852,
+        "prompt_tokens": 4317,
+        "completion_tokens": 275
+      },
+      "flags": [],
+      "next_action": "close_no_action",
+      "reasoning": "This is an unsolicited marketing email from an unregistered sender (hello@rankboost-seo.example) promoting SEO services. It is not a business order or inquiry related to Harbor Point Supply Co. products, so no action is needed.",
+      "error": null,
+      "failed_checks": [
+        "C01: hello@rankboost-seo.example"
+      ]
+    },
+    {
+      "email_id": "E030",
+      "ticket_no": "HP-1031",
+      "customer_name": "Bluefin Bistro Group",
+      "total": null,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "invoice_dispute",
+      "expected_intent": "invoice_dispute",
+      "usage": {
+        "ms": 7164,
+        "calls": 4,
+        "cost_usd": 0.0007024199999999999,
+        "prompt_tokens": 9523,
+        "completion_tokens": 728
+      },
+      "flags": [],
+      "next_action": "route_to_credit_ar",
+      "reasoning": "Maria Lopez from Bluefin Bistro Group is disputing invoice INV-55120 for order SO-24053, claiming they were charged for 6 cases of hot cups but only ordered and received 5. The order record shows 5 cases of HPS-1403 (Paper Hot Cup, 12 oz) were ordered and shipped, consistent with the customer's claim. This is an invoice dispute that should be routed to credit/AR for investigation and resolution.",
+      "error": null,
+      "failed_checks": [
+        "I01: invoice_dispute"
+      ]
+    },
+    {
+      "email_id": "E031",
+      "ticket_no": "HP-1032",
+      "customer_name": "Harborview Hotel",
+      "total": 1016,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 9336,
+        "calls": 4,
+        "cost_usd": 0.0008695799999999999,
+        "prompt_tokens": 10992,
+        "completion_tokens": 1167
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Aisha Khan, a verified procurement contact at Harborview Hotel (C003), is placing a new order for the conference center (dock B, ship-to S004). She requests 10 cases of dinner napkins (HPS-1407), 8 cases of wooden cutlery kits (HPS-1408), and 4 cases of paper straws (HPS-1406). All products are active and in stock, so the next step is to create the order for these items shipped to the conference center.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E032",
+      "ticket_no": "HP-1033",
+      "customer_name": "Northside Community Center",
+      "total": 483,
+      "priority": "urgent",
+      "lane": "waiting_on_customer",
+      "expected_lane": "waiting_on_customer",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 9413,
+        "calls": 4,
+        "cost_usd": 0.0008359800000000001,
+        "prompt_tokens": 10684,
+        "completion_tokens": 1083
+      },
+      "flags": [
+        "DATE_IN_PAST"
+      ],
+      "next_action": "create_order",
+      "reasoning": "James Ford from Northside Community Center (C015) is a verified contact requesting 4 cases of toilet tissue (regular rolls) and 5 cases of 33 gallon black bags. The products map to HPS-1103 and HPS-1201 respectively. The requested delivery date of Friday October 30 has already passed, so I should create the order but ask the customer to confirm the delivery date.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "Q01: You asked for delivery on 2026-10-30, which has passed. Which date works for you?"
+      ]
+    },
+    {
+      "email_id": "E034",
+      "ticket_no": "HP-1034",
+      "customer_name": "Metro Fitness Clubs",
+      "total": 584,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "order_addition",
+      "usage": {
+        "ms": 14362,
+        "calls": 5,
+        "cost_usd": 0.00109218,
+        "prompt_tokens": 14375,
+        "completion_tokens": 1276
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Jenna Brooks (verified contact for Metro Fitness Clubs, C005) forwards Matt's restock list for the Northgate location and asks to proceed except skip the towels. The order is for 4 cs hand sanitizer refills (HPS-1305) and 8 cs 55 gal black bags (HPS-1202), both shipped to Northgate (S008). The towels are excluded per Jenna's instruction. Both products are active and in stock, and the customer's credit is fine, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E035",
+      "ticket_no": "HP-1035",
+      "customer_name": "Union Street Deli",
+      "total": 0,
+      "priority": "normal",
+      "lane": "waiting_on_customer",
+      "expected_lane": "waiting_on_customer",
+      "intent": "new_order",
+      "expected_intent": "order_addition",
+      "usage": {
+        "ms": 24317,
+        "calls": 6,
+        "cost_usd": 0.0014467799999999997,
+        "prompt_tokens": 18119,
+        "completion_tokens": 1998
+      },
+      "flags": [
+        "AMBIGUOUS_PRODUCT"
+      ],
+      "next_action": "ask_customer",
+      "reasoning": "The customer Frank Russo from Union Street Deli asks to add 2 cases of gloves. However, the customer did not specify which type or size of gloves (there are multiple options: Nitrile Medium, Large, Small). Additionally, the word \"also\" suggests this is a follow-up to a prior order, but I cannot find a recent order this would be adding to. I need to ask the customer which gloves they want and what order this is adding to.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "Q01: For \"2 cases of gloves\", which one do you need: HPS-1001, HPS-1002, HPS-1003?"
+      ]
+    },
+    {
+      "email_id": "E036",
+      "ticket_no": "HP-1036",
+      "customer_name": "Bluefin Bistro Group",
+      "total": 1210,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 17958,
+        "calls": 6,
+        "cost_usd": 0.00136098,
+        "prompt_tokens": 17064,
+        "completion_tokens": 1873
+      },
+      "flags": [
+        "FROM_HISTORY"
+      ],
+      "next_action": "create_order",
+      "reasoning": "Maria Lopez from Bluefin Bistro Group (C001) is requesting their usual takeout order for Friday. The most recent order (SO-24053) contained HPS-1401 (10 CS), HPS-1403 (5 CS), and HPS-1404 (5 CS), which represents \"the usual.\" The requested delivery date is Friday, November 6, 2026. The customer is ACTIVE with sufficient credit, so a new order should be created with these items.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "M01: rules: new_order []; model: new_order [[\"HPS-1401\",10,\"S001\"],[\"HPS-1403\",5,\"S001\"],[\"HPS-1404\",5,\"S001\"]]"
+      ]
+    },
+    {
+      "email_id": "E037",
+      "ticket_no": "HP-1037",
+      "customer_name": "Maple Leaf Bakery",
+      "total": 269,
+      "priority": "normal",
+      "lane": "waiting_on_customer",
+      "expected_lane": "waiting_on_customer",
+      "intent": "new_order",
+      "expected_intent": "order_addition",
+      "usage": {
+        "ms": 55166,
+        "calls": 7,
+        "cost_usd": 0.0023326799999999997,
+        "prompt_tokens": 25783,
+        "completion_tokens": 4365
+      },
+      "flags": [
+        "UNIT_UNCLEAR"
+      ],
+      "next_action": "create_order",
+      "reasoning": "The email from Hannah Moore at Maple Leaf Bakery requests 5 kraft bags #8 and 2 cases of napkins. The customer says \"also send\" suggesting a follow-up, but no prior orders were found in the system, so this is treated as a new order. The unit for the kraft bags is ambiguous since no unit was specified, so I need to ask the customer to clarify whether they mean 5 cases or 5 individual bags.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing",
+        "Q01: Kraft Paper Bag, #8 comes in cases of 500 bags. You wrote 5. How many cases is that?"
+      ]
+    },
+    {
+      "email_id": "E038",
+      "ticket_no": "HP-1038",
+      "customer_name": "Seaside Senior Living",
+      "total": 1049,
+      "priority": "normal",
+      "lane": "auto_committed",
+      "expected_lane": "auto_committed",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 10009,
+        "calls": 4,
+        "cost_usd": 0.0007927199999999999,
+        "prompt_tokens": 10191,
+        "completion_tokens": 1007
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Grace Kim from Seaside Senior Living (C020) sent a new PO SSL-7790 requesting three products with quantities in cases. All three SKUs exist and are active, and the customer is ACTIVE with sufficient credit. This is a straightforward new order to create.",
+      "error": null,
+      "failed_checks": []
+    },
+    {
+      "email_id": "E039",
+      "ticket_no": "HP-1039",
+      "customer_name": "Riverside Medical Clinic",
+      "total": 471,
+      "priority": "normal",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 8220,
+        "calls": 4,
+        "cost_usd": 0.00075246,
+        "prompt_tokens": 10015,
+        "completion_tokens": 842
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Nora Fields is a verified contact for Riverside Medical Clinic (C008), an active customer. She wants a new order of 4 cases of foam soap refills (HPS-1304) and 5 cases of jumbo toilet tissue (HPS-1104), both of which clearly match single catalog SKUs. This is a straightforward new order, so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    },
+    {
+      "email_id": "E040",
+      "ticket_no": "HP-1040",
+      "customer_name": "Bayfront Event Venue",
+      "total": 1962,
+      "priority": "high",
+      "lane": "needs_review",
+      "expected_lane": "needs_review",
+      "intent": "new_order",
+      "expected_intent": "new_order",
+      "usage": {
+        "ms": 15916,
+        "calls": 5,
+        "cost_usd": 0.00129144,
+        "prompt_tokens": 16376,
+        "completion_tokens": 1716
+      },
+      "flags": [],
+      "next_action": "create_order",
+      "reasoning": "Olivia Grant from Bayfront Event Venue (verified customer C016) placed a new order under PO BV-0420 for a gala on Nov 14. The email requests four products: dinner napkins (10 cs), wooden cutlery kits (10 cs), 12 oz hot cups (8 cs), and lids for the hot cups (8 cs), all identified to SKUs HPS-1407, HPS-1408, HPS-1403, and HPS-1404 respectively. All items are in stock, the customer is ACTIVE with sufficient credit, and there is a single default ship-to (S019), so the next step is to create the order.",
+      "error": null,
+      "failed_checks": [
+        "L01: some lines inferred, unclear or missing"
+      ]
+    }
+  ]
+}

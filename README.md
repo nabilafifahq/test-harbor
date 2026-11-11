@@ -7,8 +7,8 @@ Order intake for Harbor Point Supply Co., run by an agent and supervised by peop
 | Document control | |
 |---|---|
 | Document ID | HP-O2C-README |
-| Version | 1.1.0 |
-| Date | 7 November 2026 |
+| Version | 1.1.1 |
+| Date | 11 November 2026 |
 | Owner | Nabila ([@nabilafifahq](https://github.com/nabilafifahq)) |
 | Status | Released |
 | Audience | Reviewers and operators (sections 1 to 3), engineers (sections 4 to 11) |
@@ -382,8 +382,10 @@ public/                 console (HTML, CSS, JS, fonts, icons)
 data/                   ERP snapshot, inbox/*.eml (40 emails), golden labels
 test/                   unit, smoke and model-agent tests; fake-model.mjs for local runs without a key
 scripts/eval.mjs        scores the model on the 40 emails
+scripts/db-writes.mjs   traces which tables each user action writes (docs/07)
 docs/                   submission documents
 scripts/icons.py        rebuilds public/icons.svg from Material Symbols
+tools/submission-pdf/   builds docs/submission.pdf from recorded runs
 CLAUDE.md, AGENTS.md    rules for coding agents
 vercel.json             hosting configuration
 .github/workflows/      CI and the model eval
@@ -415,6 +417,8 @@ The demo is hosted on Vercel. For production use:
 | Live URL and logins | [`docs/04-live-url-and-logins.md`](docs/04-live-url-and-logins.md) |
 | Results and agent log | [`docs/05-results-and-agent-log.md`](docs/05-results-and-agent-log.md) |
 | All five as one PDF | [`docs/submission.pdf`](docs/submission.pdf) |
+| Architecture and scaling | [`docs/06-architecture-and-scaling.md`](docs/06-architecture-and-scaling.md) |
+| Database writes per action | [`docs/07-database-writes.md`](docs/07-database-writes.md) |
 | Every model eval run | branch [`eval-results`](https://github.com/nabilafifahq/test-harbor/tree/eval-results) |
 
 ## 14. Licences and acknowledgements
@@ -431,3 +435,4 @@ The demo is hosted on Vercel. For production use:
 |---|---|---|
 | 1.0.0 | 6 November 2026 | First release: agent pipeline, review console, roles, audit, Vercel deployment |
 | 1.1.0 | 7 November 2026 | Model agent with tool calling (DeepInfra), readers-agree check, background queue, `.eml` ingest and inbound webhook, reviewer edits of items and delivery address, model eval in CI |
+| 1.1.1 | 11 November 2026 | Architecture and scaling document, database writes per action, PDF builder source; no code change |
