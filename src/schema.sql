@@ -10,7 +10,9 @@ create table sales_orders (so_number text primary key, customer_id text referenc
 create table sales_order_lines (so_number text references sales_orders, line_no int, sku text, qty_ordered int not null, qty_shipped int not null default 0, unit_price numeric(12,2) not null, primary key (so_number, line_no));
 
 -- Inbox and tickets
-create table emails (email_id text primary key, ticket_no text unique, received_at timestamptz not null, from_name text, from_email text, subject text, body text, attachments jsonb not null default '[]', message_id text unique);
+create table emails (email_id text primary key, ticket_no text unique, received_at timestamptz not null, from_name text, from_email text, subject text, body text, attachments jsonb not null default '[]', message_id text);
+-- The same mail delivered again. The sender sets the Message-ID, so the sender and the text must match too: a reused ID cannot hide other mail.
+create unique index emails_same_mail on emails (message_id, from_email, md5(body));
 create table cases (
   email_id text primary key references emails,
   ticket_no text unique,
@@ -43,4 +45,5 @@ create sequence if not exists so_number_seq;
 create index on customer_contacts (lower(email));
 create index on sales_orders (customer_id, customer_po);
 create index on audit_events (email_id);
+create index on audit_events (actor, at);
 create index on cases (status, priority);

@@ -82,6 +82,13 @@ export function inBackground(db) {
   return job;
 }
 
+// Rows with actor anonymous (failed sign-ins, refused requests without a session) cost an attacker nothing to cause.
+// At most 20 a minute are kept: enough to show an attack, too few to flood the trail.
+async function auditAnonymous(db, emailId, action, detail) {
+  const n = (await db.query("select count(*)::int as n from audit_events where actor = 'anonymous' and at > now() - interval '1 minute'")).rows[0].n;
+  if (n < 20) await audit(db, 'anonymous', 'human', emailId, action, detail);
+}
+
 const bearerOk = (req) => Boolean(process.env.CRON_SECRET) && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
 
 // New mail from the console form, or from a mail provider's inbound webhook. Raw .eml or plain fields.
@@ -89,15 +96,17 @@ async function ingest(db, b, by) {
   const e = typeof b.raw === 'string' && b.raw.trim() ? parseEml(b.raw.slice(0, 200000)) : { from_name: str(b.from_name, 200), from_email: str(b.from_email, 200).toLowerCase(), subject: str(b.subject, 300), body: str(b.body, 20000), attachments: [] };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.from_email || '')) throw httpErr(422, 'Add the sender address, for example chef@oakandember.example.');
   if (!str(e.body)) throw httpErr(422, 'The email body is empty. Paste the text of the email.');
-  // The same Message-ID is the same mail: a webhook retry or a second upload. It never makes a second ticket.
+  // The same Message-ID, sender and text is the same mail: a webhook retry or a second upload. It never makes a second ticket.
   // The provider gets the existing ticket back so it stops retrying; a person is told where the email already is.
+  const body = e.body.slice(0, 20000);
+  const same = () => db.query('select email_id, ticket_no from emails where message_id=$1 and from_email=$2 and md5(body)=md5($3)', [e.message_id, e.from_email, body]);
   const duplicate = async () => {
-    const d = (await db.query('select email_id, ticket_no from emails where message_id=$1', [e.message_id])).rows[0];
+    const d = (await same()).rows[0];
     await audit(db, by, by === 'inbound' ? 'system' : 'human', d.email_id, 'email_duplicate', { message_id: e.message_id });
     if (by !== 'inbound') throw httpErr(409, `This email is already in the inbox as ${d.ticket_no}. Open that ticket from the queue.`);
     return { email_id: d.email_id, ticket_no: d.ticket_no, queued: false, duplicate: true };
   };
-  if (e.message_id && (await db.query('select 1 from emails where message_id=$1', [e.message_id])).rows.length) return duplicate();
+  if (e.message_id && (await same()).rows.length) return duplicate();
   const n = Number((await db.query('select count(*)::int as n from emails')).rows[0].n);
   if (n >= Number(process.env.MAX_EMAILS || 300)) throw httpErr(429, 'The demo inbox is full. An Admin can reset the demo.');
   const last = (await db.query('select max(received_at) as m from emails')).rows[0].m;
@@ -107,7 +116,7 @@ async function ingest(db, b, by) {
   const no = Number((await db.query("select nextval('email_seq') as n")).rows[0].n);
   const id = `E${String(no).padStart(3, '0')}`;
   const ticket = `HP-${1000 + no}`;
-  const ins = await db.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) on conflict (message_id) do nothing returning email_id', [id, ticket, at, e.from_name || e.from_email, e.from_email, e.subject || '(no subject)', e.body.slice(0, 20000), JSON.stringify(e.attachments || []), e.message_id || null]);
+  const ins = await db.query('insert into emails values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) on conflict (message_id, from_email, md5(body)) do nothing returning email_id', [id, ticket, at, e.from_name || e.from_email, e.from_email, e.subject || '(no subject)', body, JSON.stringify(e.attachments || []), e.message_id || null]);
   if (!ins.rows.length) return duplicate(); // the same mail arrived in another request a moment earlier
   await enqueue(db, [id]);
   await audit(db, by, by === 'inbound' ? 'system' : 'human', null, 'email_received', { email_id: id, ticket_no: ticket, from: e.from_email, source: b.raw ? 'eml' : 'form' });
@@ -325,7 +334,7 @@ export async function handle(req, res) {
       const r = await login(db, str(b.username, 64), str(b.password, 256));
       if (r.error) {
         // The caller is not signed in, so the actor is anonymous. A username nobody has is not stored: people type passwords into that box.
-        await audit(db, 'anonymous', 'human', null, 'sign_in_failed', { reason: r.reason, ...(r.username ? { username: r.username } : {}), ...(r.failed ? { failed_count: r.failed } : {}) });
+        await auditAnonymous(db, null, 'sign_in_failed', { reason: r.reason, ...(r.username ? { username: r.username } : {}), ...(r.failed ? { failed_count: r.failed } : {}) });
         if (r.locked) await audit(db, 'system', 'system', null, 'account_locked', { username: r.username, failed_count: r.failed });
         return send(res, r.status, { error: r.error });
       }
@@ -445,7 +454,11 @@ export async function handle(req, res) {
   } catch (e) {
     if (!e.status || e.status >= 500) console.error(cid, e);
     // Every refused request is recorded here, so a 403 added later is covered too. A failed audit write does not hide the 403.
-    if (e.status === 403 && db) await audit(db, user?.username || 'anonymous', 'human', p.match(/^\/api\/tickets\/(E\d{3})/)?.[1] || null, 'access_denied', { method: req.method, path: p, error: e.message }).catch((err) => console.error(cid, err));
+    // The path is cut to 200 characters: the caller chooses it.
+    if (e.status === 403 && db) {
+      const denied = [p.match(/^\/api\/tickets\/(E\d{3})/)?.[1] || null, 'access_denied', { method: req.method, path: p.slice(0, 200), error: e.message }];
+      await (user ? audit(db, user.username, 'human', ...denied) : auditAnonymous(db, ...denied)).catch((err) => console.error(cid, err));
+    }
     return send(res, e.status || 500, { error: e.status ? e.message : `Something went wrong on our side. Reference ${cid}.` });
   }
 }

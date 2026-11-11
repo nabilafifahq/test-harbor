@@ -40,6 +40,8 @@ Columns filled by a column default (`id`, `at`, `created_at`, `last_seen_at` and
 
 "Any signed-in user" means the server checks a valid session and nothing else. Role checks come from `CAN` in `src/auth.js`.
 
+Rows with actor `anonymous` (failed sign-ins, and 403s for a request without a session) cost the caller nothing, so at most 20 are written per minute; further ones in the same minute are not written.
+
 ### 2.1 Sign-in and session
 
 | Action | Endpoint | Writes | Audit row |
@@ -56,8 +58,8 @@ Columns filled by a column default (`id`, `at`, `created_at`, `last_seen_at` and
 | Action | Endpoint | Who | Writes | Audit row |
 |---|---|---|---|---|
 | New email (form or `.eml` upload) | `POST /api/emails` | Any signed-in user | `nextval('email_seq')` gives the number: `email_id` `E` plus the number, `ticket_no` `HP-` plus 1000 and the number. `emails` insert: `email_id`, `ticket_no`, `received_at`, `from_name`, `from_email`, `subject`, `body`, `attachments`, `message_id` (from the `.eml`, empty for the form). With a model configured, `agent_reads` insert (`email_id`). Then the agent steps in section 3 | `email_received`, actor the username, `actor_type: human` |
-| Upload of an email whose `Message-ID` is already in `emails` | `POST /api/emails` | Any signed-in user | None. Refused with 409 and the ticket number the email already has. When two copies arrive at the same moment, the second has taken an email number that stays unused | `email_duplicate` on the existing email, detail `message_id` |
-| Inbound webhook | `POST /api/inbound` | Bearer `CRON_SECRET` | Same as New email. A `Message-ID` already in `emails` writes nothing and returns 202 with the existing `email_id` and `ticket_no`, so the provider stops retrying | `email_received`, actor `inbound`, `actor_type: system`; `email_duplicate` for a repeat |
+| Upload of an email whose `Message-ID`, sender and text are already in `emails` | `POST /api/emails` | Any signed-in user | None. Refused with 409 and the ticket number the email already has. When two copies arrive at the same moment, the second has taken an email number that stays unused. A mail that reuses a `Message-ID` with another sender or other text is a new email, so a sender cannot hide someone else's mail by copying its ID | `email_duplicate` on the existing email, detail `message_id` |
+| Inbound webhook | `POST /api/inbound` | Bearer `CRON_SECRET` | Same as New email. The same `Message-ID`, sender and text already in `emails` writes nothing and returns 202 with the existing `email_id` and `ticket_no`, so the provider stops retrying | `email_received`, actor `inbound`, `actor_type: system`; `email_duplicate` for a repeat |
 
 ### 2.3 Ticket actions
 
@@ -71,7 +73,7 @@ Columns filled by a column default (`id`, `at`, `created_at`, `last_seen_at` and
 | Approve and write to ERP, Apply change in ERP, Cancel the order in ERP | `POST /api/tickets/:id/approve` | `CAN.approve`: Credit and AR or Admin for `CREDIT_BLOCK` and `PRICE_DISPUTE`, Admin only for `SECURITY_INJECTION`, anyone otherwise | `commitProposal` (section 4). Then `cases.assignee` when empty | `approved_and_committed` inside the commit transaction. `reviewer_edited` (detail `removed`, `added`) when the reviewer changed lines or addresses. `commit_refused` (detail `errors`) when the re-checks in section 4 refuse it |
 | Reject | `POST /api/tickets/:id/reject` | Any signed-in user | `cases.status = 'closed'`, `assignee` when empty, `row_version + 1`, `updated_at` | `rejected`, detail `reason` |
 | Reset demo to 07:00 | `POST /api/admin/reset` | Admin | `app_meta` delete of the `seed:%` rows, then the seed in section 6 | `demo_reset`, actor the Admin's username, written after the seed |
-| Any request refused with 403 | Any | | None besides the audit row | `access_denied`, actor the username or `anonymous`, `email_id` when the path names a ticket, detail `method`, `path`, `error` |
+| Any request refused with 403 | Any | | None besides the audit row | `access_denied`, actor the username or `anonymous`, `email_id` when the path names a ticket, detail `method`, `path` (first 200 characters), `error` |
 
 ## 3. Agent and background steps
 
@@ -152,7 +154,7 @@ The seed runs on the first request after a deploy, when the reader mode changes 
 | `signed_out` | username | `human` | none | empty |
 | `access_denied` | username or `anonymous` | `human` | ticket in the path, if any | `method`, `path`, `error` |
 | `email_received` | username, or `inbound` | `human`, or `system` for the webhook | the new email | `email_id`, `ticket_no`, `from`, `source` (`form` or `eml`) |
-| `email_duplicate` | username, or `inbound` | `human`, or `system` for the webhook | the email that already has this `Message-ID` | `message_id` |
+| `email_duplicate` | username, or `inbound` | `human`, or `system` for the webhook | the email with the same `Message-ID`, sender and text | `message_id` |
 | `model_read`, `model_fallback` | `agent` | `agent` | the email | `model`, `tools`, `next_action`, `calls`, `prompt_tokens`, `completion_tokens`, `ms`, `cost_usd`, `error` on a fallback |
 | `ticket_created` | `agent` | `agent` | the email | `lane`, `intent`, `priority`, `model`, `flags` |
 | `auto_committed` | `agent` | `agent` | the email | `so_numbers`, `changed` or `cancelled`; `credit_released`, `value`, `reason`, `edited` |
@@ -179,6 +181,7 @@ Fixed since version 1.0 of this document: a reset erased the audit trail and did
 - After an approval, `cases.assignee` is set by a second statement outside the commit transaction, without `row_version` or `updated_at`. The commit set `updated_at` a moment earlier.
 - Auto-commit refused at commit time updates `cases` without `updated_at`. The ticket insert set it a moment earlier.
 - The copy to `audit_archive` and the drop of `audit_events` are separate statements. If the process stops between them, the retry copies the same rows again: duplicates in the archive, nothing lost.
+- Above 20 rows a minute with actor `anonymous`, further failed sign-ins and refused requests without a session are not recorded. The console's audit page shows the latest 1000 rows, so a long flood pushes older events off that page; they stay in the table and on each ticket's own timeline.
 - `audit_archive` has no screen in the console. Read it with SQL, for example `select * from audit_archive order by archived_at desc, id desc`.
 
 ## 9. Run it again

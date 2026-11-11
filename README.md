@@ -299,8 +299,8 @@ The first request after a deploy creates the schema, loads the data and queues t
 
 | Way in | How |
 |---|---|
-| Console | **New email**: type it or upload a `.eml` file. A `.eml` already in the inbox (same `Message-ID`) is refused with the ticket it already has |
-| Mail provider webhook | `POST /api/inbound` with `Authorization: Bearer $CRON_SECRET`, body `{"raw": "<the .eml text>"}` or `{"from_email", "from_name", "subject", "body"}`. A repeat delivery of the same `Message-ID` returns the existing ticket and writes nothing |
+| Console | **New email**: type it or upload a `.eml` file. A `.eml` already in the inbox (same `Message-ID`, sender and text) is refused with the ticket it already has |
+| Mail provider webhook | `POST /api/inbound` with `Authorization: Bearer $CRON_SECRET`, body `{"raw": "<the .eml text>"}` or `{"from_email", "from_name", "subject", "body"}`. A repeat delivery (same `Message-ID`, sender and text) returns the existing ticket and writes nothing |
 | Data folder | `.eml` files in `data/inbox/` are loaded at seed |
 
 Each new email is queued and a background run starts at once (`waitUntil`). A run reads with the model until it has less than 100 seconds left, then stops cleanly; with `CRON_SECRET` set it starts the next run itself. Vercel Cron calls `/api/agent/run` once a day as a backstop, and an open console restarts a stalled run within a minute. Nothing polls the database while the queue is empty, so the Neon compute can sleep.
@@ -436,4 +436,4 @@ The demo is hosted on Vercel. For production use:
 | 1.0.0 | 6 November 2026 | First release: agent pipeline, review console, roles, audit, Vercel deployment |
 | 1.1.0 | 7 November 2026 | Model agent with tool calling (DeepInfra), readers-agree check, background queue, `.eml` ingest and inbound webhook, reviewer edits of items and delivery address, model eval in CI |
 | 1.1.1 | 11 November 2026 | Architecture and scaling document, database writes per action, PDF builder source; no code change |
-| 1.2.0 | 11 November 2026 | Audit trail survives a demo reset (`audit_archive`); failed sign-ins, lockouts, sign-outs, refused requests (403) and repeat deliveries are audited; setting the current status again writes nothing; email and SO numbers from sequences; stock rows locked in SKU order; `Message-ID` deduplication; concurrency tests against Postgres 17 in CI. The seed version moves to v4, so the first request after deploy reseeds once |
+| 1.2.0 | 11 November 2026 | Audit trail survives a demo reset (`audit_archive`); failed sign-ins, lockouts, sign-outs, refused requests (403) and repeat deliveries are audited; setting the current status again writes nothing; email and SO numbers from sequences; stock rows locked in SKU order; deduplication on `Message-ID`, sender and text; audit rows from requests without a session capped at 20 a minute; concurrency tests against Postgres 17 in CI. The seed version moves to v4, so the first request after deploy reseeds once |

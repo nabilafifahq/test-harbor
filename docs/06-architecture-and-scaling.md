@@ -199,7 +199,7 @@ Found by reading the code against higher volume. None affects correctness at tod
 
 | # | Where | Today | What breaks | Change |
 |---|---|---|---|---|
-| 1 | Email ID (`ingest` in `src/app.js`) | Fixed: number from the sequence `email_seq` (was count of emails + 1); `Message-ID` stored with a unique index, so a repeat delivery returns the existing ticket | Nothing at volume | Done |
+| 1 | Email ID (`ingest` in `src/app.js`) | Fixed: number from the sequence `email_seq` (was count of emails + 1); a repeat delivery (same `Message-ID`, sender and text, unique index) returns the existing ticket | Nothing at volume | Done |
 | 2 | SO number (`commitProposal`) | Fixed: number from the sequence `so_number_seq` (was highest SO number + 1) | Nothing at volume. A commit refused by the credit check after it took a number leaves a gap in the SO numbers | Done |
 | 3 | Stock row locks (`commitProposal`) | Fixed: every inventory row of the commit locked first, in SKU order (was line by line in the order of the draft) | Nothing at volume. Two commits that share SKUs run one after the other | Done |
 | 4 | Ticket list (`listTickets`) | Loads every ticket, with the email body, on each request; filters, search and counts in memory | Response time grows with every ticket ever received | Filters, sort and keyset pagination in SQL; Postgres full-text search (`tsvector` with a GIN index) or `pg_trgm`; counts by `GROUP BY`; closed tickets out of the default query |
